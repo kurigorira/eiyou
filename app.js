@@ -85,6 +85,20 @@ function getStaffSorted() {
   });
 }
 
+var orderLocked = true;
+var orderDirty = false;
+
+function getOrderStatus(staffId, y, m) {
+  var key = y+'-'+pad(m);
+  var sKey = 'eiyou_confirmed_'+key+'_'+staffId;
+  return localStorage.getItem(sKey) === '1';
+}
+function setOrderConfirmed(staffId, y, m, val) {
+  var key = y+'-'+pad(m);
+  var sKey = 'eiyou_confirmed_'+key+'_'+staffId;
+  if (val) localStorage.setItem(sKey, '1'); else localStorage.removeItem(sKey);
+}
+
 function getOrder(staffId, y, m, d) {
   var key = y+'-'+pad(m);
   if (!orders[key] || !orders[key][staffId] || !orders[key][staffId][d]) return {b:false,l:false,d:false};
@@ -96,7 +110,6 @@ function setOrder(staffId, y, m, d, meal, val) {
   if (!orders[key][staffId]) orders[key][staffId] = {};
   if (!orders[key][staffId][d]) orders[key][staffId][d] = {b:false,l:false,d:false};
   orders[key][staffId][d][meal] = val;
-  saveOrders();
 }
 
 function parseCSV(text) {
@@ -350,15 +363,22 @@ function populateOrderStaff() {
 function renderOrderGrid() {
   var wrap = document.getElementById('order-grid-wrap');
   var summary = document.getElementById('order-summary');
+  var actions = document.getElementById('order-actions');
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) {
     wrap.innerHTML = '<p class="placeholder-msg">職員を選択してください</p>';
-    summary.style.display = 'none'; return;
+    summary.style.display = 'none';
+    actions.style.display = 'none';
+    return;
   }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
+  var confirmed = getOrderStatus(staffId, y, m);
+  orderLocked = confirmed;
+  orderDirty = false;
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
+  var disabled = orderLocked ? ' disabled' : '';
   var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>備考</th></tr></thead><tbody>';
   var totB=0, totL=0, totD=0;
   for (var d=1; d<=days; d++) {
@@ -372,29 +392,97 @@ function renderOrderGrid() {
     if (o.b) totB++; if (o.l) totL++; if (o.d) totD++;
     html += '<tr class="'+cls+'">';
     html += '<td>'+d+'</td><td>'+WEEKDAYS[dow]+'</td>';
-    html += '<td><input type="checkbox" data-d="'+d+'" data-m="b"'+(o.b?' checked':'')+'></td>';
-    html += '<td><input type="checkbox" data-d="'+d+'" data-m="l"'+(o.l?' checked':'')+'></td>';
-    html += '<td><input type="checkbox" data-d="'+d+'" data-m="d"'+(o.d?' checked':'')+'></td>';
+    html += '<td><input type="checkbox" data-d="'+d+'" data-m="b"'+(o.b?' checked':'')+disabled+'></td>';
+    html += '<td><input type="checkbox" data-d="'+d+'" data-m="l"'+(o.l?' checked':'')+disabled+'></td>';
+    html += '<td><input type="checkbox" data-d="'+d+'" data-m="d"'+(o.d?' checked':'')+disabled+'></td>';
     html += '<td style="text-align:left;font-size:0.8rem;color:#999">'+(hName||'')+'</td>';
     html += '</tr>';
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
   summary.style.display = '';
+  actions.style.display = '';
   document.getElementById('os-b').textContent = totB;
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
+  updateOrderButtons();
 
   var checks = wrap.querySelectorAll('input[type="checkbox"]');
   for (var i=0; i<checks.length; i++) {
     checks[i].addEventListener('change', function() {
-      var staffId = document.getElementById('order-staff').value;
-      var y = parseInt(document.getElementById('order-year').value);
-      var m = parseInt(document.getElementById('order-month').value);
-      setOrder(staffId, y, m, parseInt(this.getAttribute('data-d')), this.getAttribute('data-m'), this.checked);
-      updateOrderSummary(y, m, staffId);
+      var sid = document.getElementById('order-staff').value;
+      var cy = parseInt(document.getElementById('order-year').value);
+      var cm = parseInt(document.getElementById('order-month').value);
+      setOrder(sid, cy, cm, parseInt(this.getAttribute('data-d')), this.getAttribute('data-m'), this.checked);
+      orderDirty = true;
+      updateOrderSummary(cy, cm, sid);
+      updateOrderButtons();
     });
   }
+}
+
+function updateOrderButtons() {
+  var staffId = document.getElementById('order-staff').value;
+  if (!staffId) return;
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  var confirmed = getOrderStatus(staffId, y, m);
+  var status = document.getElementById('order-status');
+  var confirmBtn = document.getElementById('order-confirm');
+  var editBtn = document.getElementById('order-edit');
+
+  if (confirmed && !orderDirty) {
+    status.textContent = '確定済み';
+    status.className = 'order-status confirmed';
+    confirmBtn.style.display = 'none';
+    editBtn.style.display = '';
+  } else if (orderDirty) {
+    status.textContent = '未保存の変更があります';
+    status.className = 'order-status unsaved';
+    confirmBtn.style.display = '';
+    confirmBtn.textContent = '確定';
+    editBtn.style.display = 'none';
+  } else {
+    status.textContent = '未確定';
+    status.className = 'order-status editing';
+    confirmBtn.style.display = '';
+    confirmBtn.textContent = '確定';
+    editBtn.style.display = 'none';
+  }
+}
+
+function confirmOrder() {
+  var staffId = document.getElementById('order-staff').value;
+  if (!staffId) return;
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  saveOrders();
+  setOrderConfirmed(staffId, y, m, true);
+  orderLocked = true;
+  orderDirty = false;
+  setCheckboxDisabled(true);
+  updateOrderButtons();
+  showToast(y+'年'+m+'月の注文を確定しました');
+}
+
+function editOrder() {
+  var staffId = document.getElementById('order-staff').value;
+  if (!staffId) return;
+  orderLocked = false;
+  orderDirty = false;
+  setCheckboxDisabled(false);
+  var status = document.getElementById('order-status');
+  status.textContent = '修正中';
+  status.className = 'order-status editing';
+  document.getElementById('order-confirm').style.display = '';
+  document.getElementById('order-confirm').textContent = '確定';
+  document.getElementById('order-edit').style.display = 'none';
+  showToast('修正モードに切り替えました');
+}
+
+function setCheckboxDisabled(disabled) {
+  var checks = document.querySelectorAll('#order-grid-wrap input[type="checkbox"]');
+  for (var i=0; i<checks.length; i++) checks[i].disabled = disabled;
 }
 
 function updateOrderSummary(y, m, staffId) {
@@ -409,9 +497,15 @@ function updateOrderSummary(y, m, staffId) {
   document.getElementById('os-d').textContent = totD;
 }
 
+function requireUnlocked() {
+  if (orderLocked) { showToast('修正ボタンを押してから操作してください'); return false; }
+  return true;
+}
+
 function bulkSetWeekday(meal) {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) { showToast('職員を選択してください'); return; }
+  if (!requireUnlocked()) return;
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var days = daysInMonth(y, m);
@@ -420,13 +514,15 @@ function bulkSetWeekday(meal) {
       setOrder(staffId, y, m, d, meal, true);
     }
   }
-  renderOrderGrid();
+  orderDirty = true;
+  renderOrderGridKeepUnlocked();
   showToast('平日の'+({b:'朝食',l:'昼食',d:'夕食'}[meal])+'をセットしました');
 }
 
 function bulkCopyPrev() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) { showToast('職員を選択してください'); return; }
+  if (!requireUnlocked()) return;
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var py = m===1 ? y-1 : y;
@@ -443,20 +539,35 @@ function bulkCopyPrev() {
       orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d};
     }
   }
-  saveOrders(); renderOrderGrid();
+  orderDirty = true;
+  renderOrderGridKeepUnlocked();
   showToast('前月のデータをコピーしました');
 }
 
 function bulkClear() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) { showToast('職員を選択してください'); return; }
+  if (!requireUnlocked()) return;
   if (!confirm('この月の注文を全てクリアしますか？')) return;
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var key = y+'-'+pad(m);
-  if (orders[key] && orders[key][staffId]) { delete orders[key][staffId]; saveOrders(); }
-  renderOrderGrid();
+  if (orders[key] && orders[key][staffId]) delete orders[key][staffId];
+  setOrderConfirmed(staffId, y, m, false);
+  orderDirty = false;
+  orderLocked = false;
+  renderOrderGridKeepUnlocked();
   showToast('クリアしました');
+}
+
+function renderOrderGridKeepUnlocked() {
+  var saveLocked = orderLocked;
+  var saveDirty = orderDirty;
+  renderOrderGrid();
+  orderLocked = saveLocked;
+  orderDirty = saveDirty;
+  setCheckboxDisabled(orderLocked);
+  updateOrderButtons();
 }
 
 function navigateStaff(dir) {
@@ -674,6 +785,8 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('bulk-weekday-d').addEventListener('click', function(){bulkSetWeekday('d');});
   document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
   document.getElementById('bulk-clear').addEventListener('click', bulkClear);
+  document.getElementById('order-confirm').addEventListener('click', confirmOrder);
+  document.getElementById('order-edit').addEventListener('click', editOrder);
 
   document.getElementById('rpt-run').addEventListener('click', runReport);
   document.getElementById('rpt-print').addEventListener('click', function(){window.print();});

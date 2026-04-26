@@ -318,6 +318,32 @@ input[type="text"], input[type="date"], select {
   border-radius: 4px;
 }
 
+.order-actions {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.order-status {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.order-status.confirmed { color: var(--success); }
+.order-status.editing { color: var(--warning); }
+.order-status.unsaved { color: var(--danger); }
+
+.order-table input[type="checkbox"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Report tables */
 .rpt-section { margin-bottom: 24px; }
 .rpt-section h3 { color: var(--primary); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
