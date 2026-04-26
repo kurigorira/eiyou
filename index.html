@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>職員給食注文管理システム</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>職員給食注文管理システム</h1>
+    <nav id="main-nav">
+      <button class="tab-btn active" data-tab="today">本日の給食</button>
+      <button class="tab-btn" data-tab="order">注文入力</button>
+      <button class="tab-btn" data-tab="report">集計</button>
+      <button class="tab-btn" data-tab="staff">職員マスタ</button>
+      <button class="tab-btn" data-tab="holiday">休日マスタ</button>
+      <button class="tab-btn" data-tab="backup">データ管理</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 本日の給食 -->
+    <section id="tab-today" class="tab-content active">
+      <div class="section-header">
+        <h2>給食注文一覧</h2>
+        <div class="date-selector">
+          <button id="today-prev" class="btn-sm">&lt;</button>
+          <input type="date" id="today-date">
+          <button id="today-next" class="btn-sm">&gt;</button>
+          <button id="today-reset" class="btn-sm">今日</button>
+        </div>
+      </div>
+      <div id="today-holiday-notice" class="notice notice-warning" style="display:none"></div>
+      <div class="meal-cards">
+        <div class="meal-card">
+          <h3>朝食 <span id="b-count" class="badge">0</span></h3>
+          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
+          <tbody id="b-list"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>昼食 <span id="l-count" class="badge">0</span></h3>
+          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
+          <tbody id="l-list"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>夕食 <span id="d-count" class="badge">0</span></h3>
+          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
+          <tbody id="d-list"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 注文入力 -->
+    <section id="tab-order" class="tab-content">
+      <h2>注文入力</h2>
+      <div class="order-controls">
+        <div class="control-row">
+          <label>年月:
+            <select id="order-year"></select>年
+            <select id="order-month"></select>月
+          </label>
+          <label>部署:
+            <select id="order-dept"><option value="">全部署</option></select>
+          </label>
+          <label>職員:
+            <select id="order-staff"><option value="">-- 選択 --</option></select>
+          </label>
+          <button id="order-prev-staff" class="btn-sm">&lt; 前</button>
+          <button id="order-next-staff" class="btn-sm">次 &gt;</button>
+        </div>
+        <div class="control-row">
+          <button class="btn btn-outline" id="bulk-weekday-b">平日朝食</button>
+          <button class="btn btn-outline" id="bulk-weekday-l">平日昼食</button>
+          <button class="btn btn-outline" id="bulk-weekday-d">平日夕食</button>
+          <button class="btn btn-outline" id="bulk-copy-prev">前月コピー</button>
+          <button class="btn btn-danger-outline" id="bulk-clear">全クリア</button>
+        </div>
+      </div>
+      <div id="order-grid-wrap">
+        <p class="placeholder-msg">職員を選択してください</p>
+      </div>
+      <div id="order-summary" style="display:none">
+        <strong>合計:</strong>
+        朝食 <span id="os-b">0</span>食 / 昼食 <span id="os-l">0</span>食 / 夕食 <span id="os-d">0</span>食
+      </div>
+    </section>
+
+    <!-- 集計 -->
+    <section id="tab-report" class="tab-content">
+      <h2>月次集計</h2>
+      <div class="control-row">
+        <label>年月:
+          <select id="rpt-year"></select>年
+          <select id="rpt-month"></select>月
+        </label>
+        <button class="btn" id="rpt-run">集計実行</button>
+        <button class="btn btn-outline" id="rpt-print">印刷</button>
+      </div>
+      <div id="rpt-result"></div>
+    </section>
+
+    <!-- 職員マスタ -->
+    <section id="tab-staff" class="tab-content">
+      <h2>職員マスタ</h2>
+      <div class="card">
+        <h3 id="staff-form-title">職員登録</h3>
+        <form id="staff-form" class="inline-form">
+          <input type="text" id="sf-id" placeholder="職員ID" required>
+          <input type="text" id="sf-name" placeholder="氏名" required>
+          <input type="text" id="sf-dept" placeholder="部署" required>
+          <button type="submit" class="btn" id="sf-submit">登録</button>
+          <button type="button" class="btn btn-outline" id="sf-cancel" style="display:none">取消</button>
+        </form>
+      </div>
+      <div class="card">
+        <h3>CSV取込</h3>
+        <p class="help-text">形式: 職員ID,氏名,部署（UTF-8、ヘッダ行あり/なし対応）</p>
+        <div class="csv-controls">
+          <input type="file" id="csv-file" accept=".csv,.txt">
+          <label><input type="checkbox" id="csv-overwrite"> 既存IDを上書き</label>
+          <button class="btn" id="csv-import">取込実行</button>
+          <button class="btn btn-outline" id="csv-export">CSV出力</button>
+        </div>
+      </div>
+      <div class="card">
+        <input type="text" id="staff-search" placeholder="検索（ID・氏名・部署）" class="search-input">
+        <table class="data-table">
+          <thead><tr><th>ID</th><th>氏名</th><th>部署</th><th>操作</th></tr></thead>
+          <tbody id="staff-list"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 休日マスタ -->
+    <section id="tab-holiday" class="tab-content">
+      <h2>休日マスタ</h2>
+      <div class="card">
+        <h3>休日登録</h3>
+        <form id="holiday-form" class="inline-form">
+          <input type="date" id="hf-date" required>
+          <input type="text" id="hf-name" placeholder="名称" required>
+          <button type="submit" class="btn">登録</button>
+        </form>
+      </div>
+      <div class="card">
+        <button class="btn" id="holiday-init">祝日データ初期化（2026-2028年）</button>
+        <span class="help-text">※ 既存の祝日データに追加します</span>
+      </div>
+      <div class="card">
+        <div class="control-row">
+          <label>表示年: <select id="holiday-year-filter"></select></label>
+        </div>
+        <table class="data-table">
+          <thead><tr><th>日付</th><th>曜日</th><th>名称</th><th>操作</th></tr></thead>
+          <tbody id="holiday-list"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- データ管理 -->
+    <section id="tab-backup" class="tab-content">
+      <h2>データ管理</h2>
+      <div class="card">
+        <h3>データエクスポート</h3>
+        <p class="help-text">全データ（職員・注文・休日）をJSONファイルとして保存します。</p>
+        <button class="btn" id="data-export">エクスポート</button>
+      </div>
+      <div class="card">
+        <h3>データインポート</h3>
+        <p class="help-text">エクスポートしたJSONファイルからデータを復元します。既存データは上書きされます。</p>
+        <input type="file" id="data-import-file" accept=".json">
+        <button class="btn btn-danger" id="data-import">インポート実行</button>
+      </div>
+      <div class="card">
+        <h3>データ初期化</h3>
+        <p class="help-text">全データを削除します。この操作は元に戻せません。</p>
+        <button class="btn btn-danger" id="data-clear">全データ削除</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
