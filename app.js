@@ -33,6 +33,7 @@ var DEFAULT_HOLIDAYS = [
 var staffList = [];
 var orders = {};
 var holidays = [];
+var history = [];
 var toastTimer = null;
 
 function loadData() {
@@ -40,11 +41,28 @@ function loadData() {
     staffList = JSON.parse(localStorage.getItem('eiyou_staff') || '[]');
     orders = JSON.parse(localStorage.getItem('eiyou_orders') || '{}');
     holidays = JSON.parse(localStorage.getItem('eiyou_holidays') || '[]');
-  } catch(e) { staffList=[]; orders={}; holidays=[]; }
+    history = JSON.parse(localStorage.getItem('eiyou_history') || '[]');
+  } catch(e) { staffList=[]; orders={}; holidays=[]; history=[]; }
 }
 function saveStaff() { localStorage.setItem('eiyou_staff', JSON.stringify(staffList)); }
 function saveOrders() { localStorage.setItem('eiyou_orders', JSON.stringify(orders)); }
 function saveHolidays() { localStorage.setItem('eiyou_holidays', JSON.stringify(holidays)); }
+function saveHistory() { localStorage.setItem('eiyou_history', JSON.stringify(history)); }
+
+function addHistory(staffId, yearMonth, action, detail) {
+  var s = getStaffById(staffId);
+  var name = s ? s.name : staffId;
+  history.unshift({
+    timestamp: new Date().toLocaleString('ja-JP'),
+    staffId: staffId,
+    staffName: name,
+    yearMonth: yearMonth,
+    action: action,
+    detail: detail || ''
+  });
+  if (history.length > 500) history = history.slice(0, 500);
+  saveHistory();
+}
 
 function showToast(msg) {
   var el = document.getElementById('toast');
@@ -154,6 +172,7 @@ function showTab(name) {
   if (name==='staff') renderStaffList();
   if (name==='order') initOrderTab();
   if (name==='report') initReportTab();
+  if (name==='history') renderHistory();
   if (name==='holiday') renderHolidayList();
 }
 
@@ -457,13 +476,27 @@ function updateOrderButtons() {
   }
 }
 
+function getOrderSummaryText(staffId, y, m) {
+  var days = daysInMonth(y, m);
+  var t = {b:0,l:0,d:0,dd:0};
+  for (var d=1; d<=days; d++) {
+    var o = getOrder(staffId, y, m, d);
+    if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
+  }
+  return '朝'+t.b+' 昼'+t.l+' 夕'+t.d+' 夕医'+t.dd;
+}
+
 function confirmOrder() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) return;
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
+  var wasConfirmed = getOrderStatus(staffId, y, m);
   saveOrders();
   setOrderConfirmed(staffId, y, m, true);
+  var ym = y+'-'+pad(m);
+  var summary = getOrderSummaryText(staffId, y, m);
+  addHistory(staffId, ym, wasConfirmed ? '修正確定' : '確定', summary);
   orderLocked = true;
   orderDirty = false;
   setCheckboxDisabled(true);
@@ -488,6 +521,9 @@ function editOrder() {
     if (input === null) return;
     if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
   }
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  addHistory(staffId, y+'-'+pad(m), '修正開始', '');
   orderLocked = false;
   orderDirty = false;
   setCheckboxDisabled(false);
@@ -535,9 +571,11 @@ function bulkSetWeekday(meal) {
       setOrder(staffId, y, m, d, meal, true);
     }
   }
+  var mealName = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'}[meal];
+  addHistory(staffId, y+'-'+pad(m), '一括操作', '平日'+mealName+'セット');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
-  showToast('平日の'+({b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'}[meal])+'をセットしました');
+  showToast('平日の'+mealName+'をセットしました');
 }
 
 function bulkCopyPrev() {
@@ -560,6 +598,7 @@ function bulkCopyPrev() {
       orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd};
     }
   }
+  addHistory(staffId, y+'-'+pad(m), '前月コピー', py+'年'+pm+'月からコピー');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
   showToast('前月のデータをコピーしました');
@@ -575,6 +614,7 @@ function bulkClear() {
   var key = y+'-'+pad(m);
   if (orders[key] && orders[key][staffId]) delete orders[key][staffId];
   setOrderConfirmed(staffId, y, m, false);
+  addHistory(staffId, y+'-'+pad(m), 'クリア', '全注文を削除');
   orderDirty = false;
   orderLocked = false;
   renderOrderGridKeepUnlocked();
@@ -679,6 +719,68 @@ function runReport() {
   document.getElementById('rpt-result').innerHTML = html;
 }
 
+// ==================== HISTORY TAB ====================
+function renderHistory() {
+  populateHistoryFilters();
+  var monthF = document.getElementById('hist-month-filter').value;
+  var staffF = document.getElementById('hist-staff-filter').value;
+  var actionF = document.getElementById('hist-action-filter').value;
+
+  var tb = document.getElementById('history-list');
+  var html = '';
+  var count = 0;
+  for (var i=0; i<history.length && count<200; i++) {
+    var h = history[i];
+    if (monthF && h.yearMonth !== monthF) continue;
+    if (staffF && h.staffId !== staffF) continue;
+    if (actionF && h.action !== actionF) continue;
+    html += '<tr>';
+    html += '<td style="white-space:nowrap">'+esc(h.timestamp)+'</td>';
+    html += '<td>'+esc(h.staffId)+' '+esc(h.staffName)+'</td>';
+    html += '<td>'+esc(h.yearMonth)+'</td>';
+    html += '<td>'+esc(h.action)+'</td>';
+    html += '<td>'+esc(h.detail)+'</td>';
+    html += '</tr>';
+    count++;
+  }
+  if (!html) html = '<tr><td colspan="5" style="text-align:center;color:#999">履歴なし</td></tr>';
+  tb.innerHTML = html;
+}
+
+function populateHistoryFilters() {
+  var monthSel = document.getElementById('hist-month-filter');
+  var staffSel = document.getElementById('hist-staff-filter');
+  var curMonth = monthSel.value;
+  var curStaff = staffSel.value;
+
+  var months = {};
+  var staffIds = {};
+  for (var i=0; i<history.length; i++) {
+    months[history[i].yearMonth] = true;
+    staffIds[history[i].staffId] = history[i].staffName;
+  }
+
+  monthSel.innerHTML = '<option value="">全期間</option>';
+  Object.keys(months).sort().reverse().forEach(function(ym) {
+    var o = document.createElement('option'); o.value=ym; o.textContent=ym; monthSel.appendChild(o);
+  });
+  monthSel.value = curMonth;
+
+  staffSel.innerHTML = '<option value="">全職員</option>';
+  Object.keys(staffIds).sort().forEach(function(id) {
+    var o = document.createElement('option'); o.value=id; o.textContent=id+' '+staffIds[id]; staffSel.appendChild(o);
+  });
+  staffSel.value = curStaff;
+}
+
+function clearHistory() {
+  if (!confirm('履歴を全て削除しますか？')) return;
+  history = [];
+  saveHistory();
+  renderHistory();
+  showToast('履歴を削除しました');
+}
+
 // ==================== HOLIDAY TAB ====================
 function renderHolidayList() {
   var yearFilter = document.getElementById('holiday-year-filter');
@@ -750,7 +852,7 @@ function updatePwStatus() {
 }
 
 function dataExport() {
-  var data = { staff: staffList, orders: orders, holidays: holidays, exportDate: fmtDate(new Date()) };
+  var data = { staff: staffList, orders: orders, holidays: holidays, history: history, exportDate: fmtDate(new Date()) };
   var json = JSON.stringify(data, null, 2);
   downloadFile(json, '給食管理データ_'+fmtDate(new Date())+'.json', 'application/json');
   showToast('エクスポートしました');
@@ -767,7 +869,8 @@ function dataImport() {
       if (data.staff) staffList = data.staff;
       if (data.orders) orders = data.orders;
       if (data.holidays) holidays = data.holidays;
-      saveStaff(); saveOrders(); saveHolidays();
+      if (data.history) history = data.history;
+      saveStaff(); saveOrders(); saveHolidays(); saveHistory();
       showToast('インポートしました');
       showTab('today');
     } catch(ex) { showToast('ファイル形式が不正です'); }
@@ -777,8 +880,8 @@ function dataImport() {
 
 function dataClear() {
   if (!confirm('全データを削除します。この操作は元に戻せません。\n本当に削除しますか？')) return;
-  staffList=[]; orders={}; holidays=[];
-  saveStaff(); saveOrders(); saveHolidays();
+  staffList=[]; orders={}; holidays=[]; history=[];
+  saveStaff(); saveOrders(); saveHolidays(); saveHistory();
   showToast('全データを削除しました');
   showTab('today');
 }
@@ -827,6 +930,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
   document.getElementById('rpt-run').addEventListener('click', runReport);
   document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
+
+  document.getElementById('hist-month-filter').addEventListener('change', renderHistory);
+  document.getElementById('hist-staff-filter').addEventListener('change', renderHistory);
+  document.getElementById('hist-action-filter').addEventListener('change', renderHistory);
+  document.getElementById('hist-clear').addEventListener('click', clearHistory);
 
   document.getElementById('holiday-form').addEventListener('submit', submitHoliday);
   document.getElementById('holiday-init').addEventListener('click', initHolidays);
