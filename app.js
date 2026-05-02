@@ -35,6 +35,7 @@ var orders = {};
 var holidays = [];
 var opHistory = [];
 var toastTimer = null;
+var adminMode = false;
 
 function loadData() {
   try {
@@ -60,7 +61,7 @@ function addHistory(staffId, yearMonth, action, detail) {
     action: action,
     detail: detail || ''
   });
-  if (opHistory.length > 500) opHistory = opHistory.slice(0, 500);
+  if (opHistory.length > 2000) opHistory = opHistory.slice(0, 2000);
   saveHistory();
 }
 
@@ -891,13 +892,50 @@ function dataClear() {
   showTab('today');
 }
 
+// ==================== ADMIN MODE ====================
+function toggleAdmin() {
+  if (adminMode) {
+    adminMode = false;
+    applyAdminMode();
+    showTab('today');
+    showToast('管理者モードを解除しました');
+    return;
+  }
+  var savedPw = getEditPassword();
+  if (savedPw) {
+    var input = prompt('管理者パスワードを入力してください');
+    if (input === null) return;
+    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
+  }
+  adminMode = true;
+  applyAdminMode();
+  showToast('管理者モードに入りました');
+}
+
+function applyAdminMode() {
+  var els = document.querySelectorAll('.admin-only');
+  for (var i = 0; i < els.length; i++) {
+    els[i].style.display = adminMode ? '' : 'none';
+  }
+  var btn = document.getElementById('admin-toggle');
+  if (adminMode) {
+    btn.textContent = '管理者モード解除';
+    btn.classList.add('active-admin');
+  } else {
+    btn.textContent = '管理者';
+    btn.classList.remove('active-admin');
+  }
+}
+
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', function() {
   loadData();
 
   document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    if (btn.id === 'admin-toggle') return;
     btn.addEventListener('click', function() { showTab(this.getAttribute('data-tab')); });
   });
+  document.getElementById('admin-toggle').addEventListener('click', toggleAdmin);
 
   var todayInput = document.getElementById('today-date');
   todayInput.value = fmtDate(new Date());
