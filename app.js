@@ -33,7 +33,7 @@ var DEFAULT_HOLIDAYS = [
 var staffList = [];
 var orders = {};
 var holidays = [];
-var history = [];
+var opHistory = [];
 var toastTimer = null;
 
 function loadData() {
@@ -41,18 +41,18 @@ function loadData() {
     staffList = JSON.parse(localStorage.getItem('eiyou_staff') || '[]');
     orders = JSON.parse(localStorage.getItem('eiyou_orders') || '{}');
     holidays = JSON.parse(localStorage.getItem('eiyou_holidays') || '[]');
-    history = JSON.parse(localStorage.getItem('eiyou_history') || '[]');
-  } catch(e) { staffList=[]; orders={}; holidays=[]; history=[]; }
+    opHistory = JSON.parse(localStorage.getItem('eiyou_history') || '[]');
+  } catch(e) { staffList=[]; orders={}; holidays=[]; opHistory=[]; }
 }
 function saveStaff() { localStorage.setItem('eiyou_staff', JSON.stringify(staffList)); }
 function saveOrders() { localStorage.setItem('eiyou_orders', JSON.stringify(orders)); }
 function saveHolidays() { localStorage.setItem('eiyou_holidays', JSON.stringify(holidays)); }
-function saveHistory() { localStorage.setItem('eiyou_history', JSON.stringify(history)); }
+function saveHistory() { localStorage.setItem('eiyou_history', JSON.stringify(opHistory)); }
 
 function addHistory(staffId, yearMonth, action, detail) {
   var s = getStaffById(staffId);
   var name = s ? s.name : staffId;
-  history.unshift({
+  opHistory.unshift({
     timestamp: new Date().toLocaleString('ja-JP'),
     staffId: staffId,
     staffName: name,
@@ -60,7 +60,7 @@ function addHistory(staffId, yearMonth, action, detail) {
     action: action,
     detail: detail || ''
   });
-  if (history.length > 500) history = history.slice(0, 500);
+  if (opHistory.length > 500) opHistory = opHistory.slice(0, 500);
   saveHistory();
 }
 
@@ -734,8 +734,8 @@ function renderHistory() {
   var tb = document.getElementById('history-list');
   var html = '';
   var count = 0;
-  for (var i=0; i<history.length && count<200; i++) {
-    var h = history[i];
+  for (var i=0; i<opHistory.length && count<200; i++) {
+    var h = opHistory[i];
     if (monthF && h.yearMonth !== monthF) continue;
     if (staffF && h.staffId !== staffF) continue;
     if (actionF && h.action !== actionF) continue;
@@ -760,9 +760,9 @@ function populateHistoryFilters() {
 
   var months = {};
   var staffIds = {};
-  for (var i=0; i<history.length; i++) {
-    months[history[i].yearMonth] = true;
-    staffIds[history[i].staffId] = history[i].staffName;
+  for (var i=0; i<opHistory.length; i++) {
+    months[opHistory[i].yearMonth] = true;
+    staffIds[opHistory[i].staffId] = opHistory[i].staffName;
   }
 
   monthSel.innerHTML = '<option value="">全期間</option>';
@@ -780,7 +780,7 @@ function populateHistoryFilters() {
 
 function clearHistory() {
   if (!confirm('履歴を全て削除しますか？')) return;
-  history = [];
+  opHistory = [];
   saveHistory();
   renderHistory();
   showToast('履歴を削除しました');
@@ -857,7 +857,7 @@ function updatePwStatus() {
 }
 
 function dataExport() {
-  var data = { staff: staffList, orders: orders, holidays: holidays, history: history, exportDate: fmtDate(new Date()) };
+  var data = { staff: staffList, orders: orders, holidays: holidays, history: opHistory, exportDate: fmtDate(new Date()) };
   var json = JSON.stringify(data, null, 2);
   downloadFile(json, '給食管理データ_'+fmtDate(new Date())+'.json', 'application/json');
   showToast('エクスポートしました');
@@ -874,7 +874,7 @@ function dataImport() {
       if (data.staff) staffList = data.staff;
       if (data.orders) orders = data.orders;
       if (data.holidays) holidays = data.holidays;
-      if (data.history) history = data.history;
+      if (data.history) opHistory = data.history;
       saveStaff(); saveOrders(); saveHolidays(); saveHistory();
       showToast('インポートしました');
       showTab('today');
@@ -885,7 +885,7 @@ function dataImport() {
 
 function dataClear() {
   if (!confirm('全データを削除します。この操作は元に戻せません。\n本当に削除しますか？')) return;
-  staffList=[]; orders={}; holidays=[]; history=[];
+  staffList=[]; orders={}; holidays=[]; opHistory=[];
   saveStaff(); saveOrders(); saveHolidays(); saveHistory();
   showToast('全データを削除しました');
   showTab('today');
