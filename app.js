@@ -995,6 +995,7 @@ function applyAdminMode() {
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', function() {
+  try {
   loadData();
 
   document.querySelectorAll('.tab-btn').forEach(function(btn) {
@@ -1072,4 +1073,9 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('data-clear').addEventListener('click', dataClear);
 
   renderToday();
+  } catch(err) {
+    document.getElementById('toast').textContent = 'エラー: ' + err.message;
+    document.getElementById('toast').classList.add('show');
+    document.getElementById('toast').style.opacity = '1';
+  }
 });
