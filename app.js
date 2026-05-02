@@ -789,6 +789,12 @@ function populateHistoryFilters() {
 }
 
 function clearHistory() {
+  var savedPw = getEditPassword();
+  if (savedPw) {
+    var input = prompt('管理者パスワードを入力してください');
+    if (input === null) return;
+    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
+  }
   if (!confirm('履歴を全て削除しますか？')) return;
   opHistory = [];
   saveHistory();
