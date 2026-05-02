@@ -176,7 +176,7 @@ function showTab(name) {
   var btn = document.querySelector('[data-tab="'+name+'"]');
   if (btn) btn.classList.add('active');
   if (name==='today') renderToday();
-  if (name==='staff') { renderStaffList(); populateChildStaff(); }
+  if (name==='staff') { renderStaffList(); populateChildStaff(); renderChildList(); }
   if (name==='order') initOrderTab();
   if (name==='report') initReportTab();
   if (name==='history') renderHistory();
@@ -868,16 +868,18 @@ function populateChildStaff() {
 }
 
 function renderChildList() {
-  var staffId = document.getElementById('child-staff').value;
-  var manage = document.getElementById('child-manage');
-  if (!staffId) { manage.style.display = 'none'; return; }
-  manage.style.display = '';
-  var list = getChildrenByStaff(staffId);
   var tb = document.getElementById('child-list');
   var html = '';
-  for (var i=0; i<list.length; i++) {
-    html += '<tr><td>'+esc(list[i].id)+'</td><td>'+esc(list[i].name)+'</td>';
-    html += '<td><button class="btn-del" onclick="deleteChild(\''+esc(list[i].id)+'\')">削除</button></td></tr>';
+  var sorted = children.slice().sort(function(a,b) {
+    if (a.staffId < b.staffId) return -1; if (a.staffId > b.staffId) return 1;
+    return 0;
+  });
+  for (var i=0; i<sorted.length; i++) {
+    var c = sorted[i];
+    var s = getStaffById(c.staffId);
+    var pName = s ? s.name+'('+c.staffId+')' : c.staffId;
+    html += '<tr><td>'+esc(c.name)+'</td><td>'+esc(pName)+'</td>';
+    html += '<td><button class="btn-del" onclick="deleteChild(\''+esc(c.id)+'\')">削除</button></td></tr>';
   }
   if (!html) html = '<tr><td colspan="3" style="text-align:center;color:#999">子供の登録なし</td></tr>';
   tb.innerHTML = html;
@@ -886,7 +888,7 @@ function renderChildList() {
 function submitChild(e) {
   e.preventDefault();
   var staffId = document.getElementById('child-staff').value;
-  if (!staffId) return;
+  if (!staffId) { showToast('職員を選択してください'); return; }
   var name = document.getElementById('cf-name').value.trim();
   if (!name) return;
   var id = 'C' + Date.now();
