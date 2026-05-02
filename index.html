@@ -49,6 +49,11 @@
           <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
           <tbody id="d-list"></tbody></table>
         </div>
+        <div class="meal-card">
+          <h3>夕食医師 <span id="dd-count" class="badge">0</span></h3>
+          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
+          <tbody id="dd-list"></tbody></table>
+        </div>
       </div>
     </section>
 
@@ -74,6 +79,7 @@
           <button class="btn btn-outline" id="bulk-weekday-b">平日朝食</button>
           <button class="btn btn-outline" id="bulk-weekday-l">平日昼食</button>
           <button class="btn btn-outline" id="bulk-weekday-d">平日夕食</button>
+          <button class="btn btn-outline" id="bulk-weekday-dd">平日夕医師</button>
           <button class="btn btn-outline" id="bulk-copy-prev">前月コピー</button>
           <button class="btn btn-danger-outline" id="bulk-clear">全クリア</button>
         </div>
@@ -83,7 +89,7 @@
       </div>
       <div id="order-summary" style="display:none">
         <strong>合計:</strong>
-        朝食 <span id="os-b">0</span>食 / 昼食 <span id="os-l">0</span>食 / 夕食 <span id="os-d">0</span>食
+        朝食 <span id="os-b">0</span>食 / 昼食 <span id="os-l">0</span>食 / 夕食 <span id="os-d">0</span>食 / 夕食医師 <span id="os-dd">0</span>食
       </div>
       <div id="order-actions" style="display:none" class="order-actions">
         <span id="order-status" class="order-status"></span>
@@ -167,6 +173,16 @@
     <!-- データ管理 -->
     <section id="tab-backup" class="tab-content">
       <h2>データ管理</h2>
+      <div class="card">
+        <h3>編集パスワード設定</h3>
+        <p class="help-text">確定済み注文の修正時に必要なパスワードを設定します。</p>
+        <div class="inline-form">
+          <input type="password" id="pw-input" placeholder="パスワード">
+          <button class="btn" id="pw-save">パスワード設定</button>
+          <button class="btn btn-danger-outline" id="pw-clear">パスワード解除</button>
+        </div>
+        <p id="pw-status" class="help-text" style="margin-top:6px"></p>
+      </div>
       <div class="card">
         <h3>データエクスポート</h3>
         <p class="help-text">全データ（職員・注文・休日）をJSONファイルとして保存します。</p>

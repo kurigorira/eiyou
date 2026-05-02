@@ -99,16 +99,18 @@ function setOrderConfirmed(staffId, y, m, val) {
   if (val) localStorage.setItem(sKey, '1'); else localStorage.removeItem(sKey);
 }
 
+function emptyMeal() { return {b:false,l:false,d:false,dd:false}; }
 function getOrder(staffId, y, m, d) {
   var key = y+'-'+pad(m);
-  if (!orders[key] || !orders[key][staffId] || !orders[key][staffId][d]) return {b:false,l:false,d:false};
-  return orders[key][staffId][d];
+  if (!orders[key] || !orders[key][staffId] || !orders[key][staffId][d]) return emptyMeal();
+  var o = orders[key][staffId][d];
+  return {b:!!o.b, l:!!o.l, d:!!o.d, dd:!!o.dd};
 }
 function setOrder(staffId, y, m, d, meal, val) {
   var key = y+'-'+pad(m);
   if (!orders[key]) orders[key] = {};
   if (!orders[key][staffId]) orders[key][staffId] = {};
-  if (!orders[key][staffId][d]) orders[key][staffId][d] = {b:false,l:false,d:false};
+  if (!orders[key][staffId][d]) orders[key][staffId][d] = emptyMeal();
   orders[key][staffId][d][meal] = val;
 }
 
@@ -169,7 +171,7 @@ function renderToday() {
   else if (dow===0||dow===6) { notice.textContent = ds+' は'+WEEKDAYS[dow]+'曜日です'; notice.style.display='block'; }
   else { notice.style.display='none'; }
 
-  var bList=[], lList=[], dList=[];
+  var bList=[], lList=[], dList=[], ddList=[];
   var sorted = getStaffSorted();
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
@@ -177,10 +179,12 @@ function renderToday() {
     if (o.b) bList.push(s);
     if (o.l) lList.push(s);
     if (o.d) dList.push(s);
+    if (o.dd) ddList.push(s);
   }
   fillMealList('b-list', bList); document.getElementById('b-count').textContent = bList.length;
   fillMealList('l-list', lList); document.getElementById('l-count').textContent = lList.length;
   fillMealList('d-list', dList); document.getElementById('d-count').textContent = dList.length;
+  fillMealList('dd-list', ddList); document.getElementById('dd-count').textContent = ddList.length;
 }
 function fillMealList(tbodyId, list) {
   var tb = document.getElementById(tbodyId);
@@ -379,8 +383,8 @@ function renderOrderGrid() {
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
   var disabled = orderLocked ? ' disabled' : '';
-  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>備考</th></tr></thead><tbody>';
-  var totB=0, totL=0, totD=0;
+  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>備考</th></tr></thead><tbody>';
+  var totB=0, totL=0, totD=0, totDD=0;
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
     var ds = y+'-'+pad(m)+'-'+pad(d);
@@ -389,12 +393,13 @@ function renderOrderGrid() {
     if (hName) cls='day-holiday'; else if (dow===0) cls='day-sun'; else if (dow===6) cls='day-sat';
     if (ds===todayStr) cls += ' day-today';
     var o = getOrder(staffId, y, m, d);
-    if (o.b) totB++; if (o.l) totL++; if (o.d) totD++;
+    if (o.b) totB++; if (o.l) totL++; if (o.d) totD++; if (o.dd) totDD++;
     html += '<tr class="'+cls+'">';
     html += '<td>'+d+'</td><td>'+WEEKDAYS[dow]+'</td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="b"'+(o.b?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="l"'+(o.l?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="d"'+(o.d?' checked':'')+disabled+'></td>';
+    html += '<td><input type="checkbox" data-d="'+d+'" data-m="dd"'+(o.dd?' checked':'')+disabled+'></td>';
     html += '<td style="text-align:left;font-size:0.8rem;color:#999">'+(hName||'')+'</td>';
     html += '</tr>';
   }
@@ -405,6 +410,7 @@ function renderOrderGrid() {
   document.getElementById('os-b').textContent = totB;
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
+  document.getElementById('os-dd').textContent = totDD;
   updateOrderButtons();
 
   var checks = wrap.querySelectorAll('input[type="checkbox"]');
@@ -465,9 +471,23 @@ function confirmOrder() {
   showToast(y+'年'+m+'月の注文を確定しました');
 }
 
+function getEditPassword() {
+  return localStorage.getItem('eiyou_edit_password') || '';
+}
+function setEditPassword(pw) {
+  if (pw) localStorage.setItem('eiyou_edit_password', pw);
+  else localStorage.removeItem('eiyou_edit_password');
+}
+
 function editOrder() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) return;
+  var savedPw = getEditPassword();
+  if (savedPw) {
+    var input = prompt('編集パスワードを入力してください');
+    if (input === null) return;
+    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
+  }
   orderLocked = false;
   orderDirty = false;
   setCheckboxDisabled(false);
@@ -487,14 +507,15 @@ function setCheckboxDisabled(disabled) {
 
 function updateOrderSummary(y, m, staffId) {
   var days = daysInMonth(y, m);
-  var totB=0, totL=0, totD=0;
+  var totB=0, totL=0, totD=0, totDD=0;
   for (var d=1; d<=days; d++) {
     var o = getOrder(staffId, y, m, d);
-    if (o.b) totB++; if (o.l) totL++; if (o.d) totD++;
+    if (o.b) totB++; if (o.l) totL++; if (o.d) totD++; if (o.dd) totDD++;
   }
   document.getElementById('os-b').textContent = totB;
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
+  document.getElementById('os-dd').textContent = totDD;
 }
 
 function requireUnlocked() {
@@ -516,7 +537,7 @@ function bulkSetWeekday(meal) {
   }
   orderDirty = true;
   renderOrderGridKeepUnlocked();
-  showToast('平日の'+({b:'朝食',l:'昼食',d:'夕食'}[meal])+'をセットしました');
+  showToast('平日の'+({b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'}[meal])+'をセットしました');
 }
 
 function bulkCopyPrev() {
@@ -532,11 +553,11 @@ function bulkCopyPrev() {
   var days = daysInMonth(y, m);
   for (var d=1; d<=days; d++) {
     var prev = getOrder(staffId, py, pm, d);
-    if (prev.b||prev.l||prev.d) {
+    if (prev.b||prev.l||prev.d||prev.dd) {
       var key = y+'-'+pad(m);
       if (!orders[key]) orders[key] = {};
       if (!orders[key][staffId]) orders[key][staffId] = {};
-      orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d};
+      orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd};
     }
   }
   orderDirty = true;
@@ -601,53 +622,57 @@ function runReport() {
   var days = daysInMonth(y, m);
   var sorted = getStaffSorted();
 
-  var totalB=0, totalL=0, totalD=0;
+  var totalB=0, totalL=0, totalD=0, totalDD=0;
   var deptData = {};
   var dailyData = [];
 
   for (var d=1; d<=days; d++) {
-    var dayB=0, dayL=0, dayD=0;
+    var dayB=0, dayL=0, dayD=0, dayDD=0;
     for (var i=0; i<sorted.length; i++) {
       var s = sorted[i];
       var o = getOrder(s.id, y, m, d);
       if (o.b) { dayB++; totalB++; }
       if (o.l) { dayL++; totalL++; }
       if (o.d) { dayD++; totalD++; }
-      if (!deptData[s.dept]) deptData[s.dept] = {b:0,l:0,d:0};
+      if (o.dd) { dayDD++; totalDD++; }
+      if (!deptData[s.dept]) deptData[s.dept] = {b:0,l:0,d:0,dd:0};
       if (o.b) deptData[s.dept].b++;
       if (o.l) deptData[s.dept].l++;
       if (o.d) deptData[s.dept].d++;
+      if (o.dd) deptData[s.dept].dd++;
     }
-    dailyData.push({day:d, dow:dayOfWeek(y,m,d), b:dayB, l:dayL, d:dayD});
+    dailyData.push({day:d, dow:dayOfWeek(y,m,d), b:dayB, l:dayL, d:dayD, dd:dayDD});
   }
 
+  var totalAll = totalB+totalL+totalD+totalDD;
   var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 月次合計</h3>';
   html += '<table class="rpt-table"><thead><tr><th>食事</th><th>食数</th></tr></thead><tbody>';
   html += '<tr><td>朝食</td><td>'+totalB+'</td></tr>';
   html += '<tr><td>昼食</td><td>'+totalL+'</td></tr>';
   html += '<tr><td>夕食</td><td>'+totalD+'</td></tr>';
-  html += '</tbody><tfoot><tr><td>合計</td><td>'+(totalB+totalL+totalD)+'</td></tr></tfoot></table></div>';
+  html += '<tr><td>夕食医師</td><td>'+totalDD+'</td></tr>';
+  html += '</tbody><tfoot><tr><td>合計</td><td>'+totalAll+'</td></tr></tfoot></table></div>';
 
   html += '<div class="rpt-section"><h3>部署別集計</h3>';
-  html += '<table class="rpt-table"><thead><tr><th>部署</th><th>朝食</th><th>昼食</th><th>夕食</th><th>合計</th></tr></thead><tbody>';
+  html += '<table class="rpt-table"><thead><tr><th>部署</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>合計</th></tr></thead><tbody>';
   var deptKeys = Object.keys(deptData).sort();
-  var sumB=0,sumL=0,sumD=0;
+  var sumB=0,sumL=0,sumD=0,sumDD=0;
   for (var i=0; i<deptKeys.length; i++) {
-    var dd = deptData[deptKeys[i]];
-    html += '<tr><td>'+esc(deptKeys[i])+'</td><td>'+dd.b+'</td><td>'+dd.l+'</td><td>'+dd.d+'</td><td>'+(dd.b+dd.l+dd.d)+'</td></tr>';
-    sumB+=dd.b; sumL+=dd.l; sumD+=dd.d;
+    var dp = deptData[deptKeys[i]];
+    html += '<tr><td>'+esc(deptKeys[i])+'</td><td>'+dp.b+'</td><td>'+dp.l+'</td><td>'+dp.d+'</td><td>'+dp.dd+'</td><td>'+(dp.b+dp.l+dp.d+dp.dd)+'</td></tr>';
+    sumB+=dp.b; sumL+=dp.l; sumD+=dp.d; sumDD+=dp.dd;
   }
-  html += '</tbody><tfoot><tr><td>合計</td><td>'+sumB+'</td><td>'+sumL+'</td><td>'+sumD+'</td><td>'+(sumB+sumL+sumD)+'</td></tr></tfoot></table></div>';
+  html += '</tbody><tfoot><tr><td>合計</td><td>'+sumB+'</td><td>'+sumL+'</td><td>'+sumD+'</td><td>'+sumDD+'</td><td>'+(sumB+sumL+sumD+sumDD)+'</td></tr></tfoot></table></div>';
 
   html += '<div class="rpt-section"><h3>日別内訳</h3>';
-  html += '<table class="rpt-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>合計</th></tr></thead><tbody>';
+  html += '<table class="rpt-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>合計</th></tr></thead><tbody>';
   for (var i=0; i<dailyData.length; i++) {
-    var dd = dailyData[i];
-    var ds = y+'-'+pad(m)+'-'+pad(dd.day);
+    var dy = dailyData[i];
+    var ds = y+'-'+pad(m)+'-'+pad(dy.day);
     var hName = getHolidayName(ds);
-    var label = WEEKDAYS[dd.dow];
+    var label = WEEKDAYS[dy.dow];
     if (hName) label += '('+hName+')';
-    html += '<tr><td>'+dd.day+'</td><td style="text-align:center">'+label+'</td><td>'+dd.b+'</td><td>'+dd.l+'</td><td>'+dd.d+'</td><td>'+(dd.b+dd.l+dd.d)+'</td></tr>';
+    html += '<tr><td>'+dy.day+'</td><td style="text-align:center">'+label+'</td><td>'+dy.b+'</td><td>'+dy.l+'</td><td>'+dy.d+'</td><td>'+dy.dd+'</td><td>'+(dy.b+dy.l+dy.d+dy.dd)+'</td></tr>';
   }
   html += '</tbody></table></div>';
 
@@ -713,6 +738,17 @@ function initHolidays() {
 }
 
 // ==================== DATA MANAGEMENT ====================
+function updatePwStatus() {
+  var el = document.getElementById('pw-status');
+  if (getEditPassword()) {
+    el.textContent = '※ パスワードが設定されています。確定済み注文の修正時にパスワード入力が必要です。';
+    el.style.color = '#28a745';
+  } else {
+    el.textContent = '※ パスワード未設定。誰でも確定済み注文を修正できます。';
+    el.style.color = '#dc3545';
+  }
+}
+
 function dataExport() {
   var data = { staff: staffList, orders: orders, holidays: holidays, exportDate: fmtDate(new Date()) };
   var json = JSON.stringify(data, null, 2);
@@ -783,6 +819,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('bulk-weekday-b').addEventListener('click', function(){bulkSetWeekday('b');});
   document.getElementById('bulk-weekday-l').addEventListener('click', function(){bulkSetWeekday('l');});
   document.getElementById('bulk-weekday-d').addEventListener('click', function(){bulkSetWeekday('d');});
+  document.getElementById('bulk-weekday-dd').addEventListener('click', function(){bulkSetWeekday('dd');});
   document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
   document.getElementById('bulk-clear').addEventListener('click', bulkClear);
   document.getElementById('order-confirm').addEventListener('click', confirmOrder);
@@ -794,6 +831,22 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('holiday-form').addEventListener('submit', submitHoliday);
   document.getElementById('holiday-init').addEventListener('click', initHolidays);
   document.getElementById('holiday-year-filter').addEventListener('change', renderHolidayList);
+
+  document.getElementById('pw-save').addEventListener('click', function() {
+    var pw = document.getElementById('pw-input').value;
+    if (!pw) { showToast('パスワードを入力してください'); return; }
+    setEditPassword(pw);
+    document.getElementById('pw-input').value = '';
+    updatePwStatus();
+    showToast('パスワードを設定しました');
+  });
+  document.getElementById('pw-clear').addEventListener('click', function() {
+    if (!confirm('パスワードを解除しますか？')) return;
+    setEditPassword('');
+    updatePwStatus();
+    showToast('パスワードを解除しました');
+  });
+  updatePwStatus();
 
   document.getElementById('data-export').addEventListener('click', dataExport);
   document.getElementById('data-import').addEventListener('click', dataImport);
