@@ -867,6 +867,8 @@ function populateChildStaff() {
   var search = (document.getElementById('child-staff-search').value || '').toLowerCase();
   sel.innerHTML = '<option value="">-- 選択 --</option>';
   var sorted = getStaffSorted();
+  var matchCount = 0;
+  var lastMatchId = '';
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
     if (search && s.id.toLowerCase().indexOf(search)===-1 && s.name.toLowerCase().indexOf(search)===-1 && s.dept.toLowerCase().indexOf(search)===-1) continue;
@@ -874,8 +876,14 @@ function populateChildStaff() {
     o.value = s.id;
     o.textContent = s.id + ' ' + s.name + '（' + s.dept + '）';
     sel.appendChild(o);
+    matchCount++;
+    lastMatchId = s.id;
   }
-  sel.value = cur;
+  if (cur && sel.querySelector('option[value="'+cur+'"]')) {
+    sel.value = cur;
+  } else if (search && matchCount === 1) {
+    sel.value = lastMatchId;
+  }
 }
 
 function renderChildList() {
