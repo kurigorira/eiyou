@@ -863,14 +863,19 @@ function initHolidays() {
 // ==================== CHILDREN MANAGEMENT ====================
 function populateChildStaff() {
   var sel = document.getElementById('child-staff');
+  var cur = sel.value;
+  var search = (document.getElementById('child-staff-search').value || '').toLowerCase();
   sel.innerHTML = '<option value="">-- 選択 --</option>';
   var sorted = getStaffSorted();
   for (var i=0; i<sorted.length; i++) {
+    var s = sorted[i];
+    if (search && s.id.toLowerCase().indexOf(search)===-1 && s.name.toLowerCase().indexOf(search)===-1 && s.dept.toLowerCase().indexOf(search)===-1) continue;
     var o = document.createElement('option');
-    o.value = sorted[i].id;
-    o.textContent = sorted[i].id + ' ' + sorted[i].name;
+    o.value = s.id;
+    o.textContent = s.id + ' ' + s.name + '（' + s.dept + '）';
     sel.appendChild(o);
   }
+  sel.value = cur;
 }
 
 function renderChildList() {
@@ -1030,6 +1035,7 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('staff-search').addEventListener('input', renderStaffList);
   document.getElementById('csv-import').addEventListener('click', importCSV);
   document.getElementById('csv-export').addEventListener('click', exportCSV);
+  document.getElementById('child-staff-search').addEventListener('input', populateChildStaff);
   document.getElementById('child-staff').addEventListener('change', renderChildList);
   document.getElementById('child-form').addEventListener('submit', submitChild);
 
