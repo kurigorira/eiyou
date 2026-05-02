@@ -34,6 +34,7 @@ var staffList = [];
 var orders = {};
 var holidays = [];
 var opHistory = [];
+var children = [];
 var toastTimer = null;
 var adminMode = false;
 
@@ -43,7 +44,12 @@ function loadData() {
     orders = JSON.parse(localStorage.getItem('eiyou_orders') || '{}');
     holidays = JSON.parse(localStorage.getItem('eiyou_holidays') || '[]');
     opHistory = JSON.parse(localStorage.getItem('eiyou_history') || '[]');
-  } catch(e) { staffList=[]; orders={}; holidays=[]; opHistory=[]; }
+    children = JSON.parse(localStorage.getItem('eiyou_children') || '[]');
+  } catch(e) { staffList=[]; orders={}; holidays=[]; opHistory=[]; children=[]; }
+}
+function saveChildren() { localStorage.setItem('eiyou_children', JSON.stringify(children)); }
+function getChildrenByStaff(staffId) {
+  return children.filter(function(c) { return c.staffId === staffId; });
 }
 function saveStaff() { localStorage.setItem('eiyou_staff', JSON.stringify(staffList)); }
 function saveOrders() { localStorage.setItem('eiyou_orders', JSON.stringify(orders)); }
@@ -170,7 +176,7 @@ function showTab(name) {
   var btn = document.querySelector('[data-tab="'+name+'"]');
   if (btn) btn.classList.add('active');
   if (name==='today') renderToday();
-  if (name==='staff') renderStaffList();
+  if (name==='staff') { renderStaffList(); populateChildStaff(); }
   if (name==='order') initOrderTab();
   if (name==='report') initReportTab();
   if (name==='history') renderHistory();
@@ -228,11 +234,13 @@ function renderStaffList() {
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
     if (search && s.id.toLowerCase().indexOf(search)===-1 && s.name.toLowerCase().indexOf(search)===-1 && s.dept.toLowerCase().indexOf(search)===-1) continue;
+    var cc = getChildrenByStaff(s.id).length;
     html+='<tr><td>'+esc(s.id)+'</td><td>'+esc(s.name)+'</td><td>'+esc(s.dept)+'</td>';
+    html+='<td>'+(cc>0?cc+'人':'')+'</td>';
     html+='<td><button class="btn-edit" onclick="editStaff(\''+esc(s.id)+'\')">編集</button>';
     html+='<button class="btn-del" onclick="deleteStaff(\''+esc(s.id)+'\')">削除</button></td></tr>';
   }
-  if (!html) html='<tr><td colspan="4" style="text-align:center;color:#999">職員データがありません</td></tr>';
+  if (!html) html='<tr><td colspan="5" style="text-align:center;color:#999">職員データがありません</td></tr>';
   tb.innerHTML = html;
 }
 
@@ -282,10 +290,11 @@ function cancelEditStaff() {
 function deleteStaff(id) {
   var s = getStaffById(id);
   if (!s) return;
-  if (!confirm(s.name+'（'+id+'）を削除しますか？\n関連する注文データも削除されます。')) return;
+  if (!confirm(s.name+'（'+id+'）を削除しますか？\n関連する注文・子供データも削除されます。')) return;
   staffList = staffList.filter(function(x){return x.id!==id;});
+  children = children.filter(function(c){return c.staffId!==id;});
   for (var key in orders) { if (orders[key][id]) delete orders[key][id]; }
-  saveStaff(); saveOrders();
+  saveStaff(); saveOrders(); saveChildren();
   showToast('削除しました');
   renderStaffList();
 }
@@ -845,6 +854,62 @@ function initHolidays() {
   showToast(added+'件追加しました');
 }
 
+// ==================== CHILDREN MANAGEMENT ====================
+function populateChildStaff() {
+  var sel = document.getElementById('child-staff');
+  sel.innerHTML = '<option value="">-- 選択 --</option>';
+  var sorted = getStaffSorted();
+  for (var i=0; i<sorted.length; i++) {
+    var o = document.createElement('option');
+    o.value = sorted[i].id;
+    o.textContent = sorted[i].id + ' ' + sorted[i].name;
+    sel.appendChild(o);
+  }
+}
+
+function renderChildList() {
+  var staffId = document.getElementById('child-staff').value;
+  var manage = document.getElementById('child-manage');
+  if (!staffId) { manage.style.display = 'none'; return; }
+  manage.style.display = '';
+  var list = getChildrenByStaff(staffId);
+  var tb = document.getElementById('child-list');
+  var html = '';
+  for (var i=0; i<list.length; i++) {
+    html += '<tr><td>'+esc(list[i].id)+'</td><td>'+esc(list[i].name)+'</td>';
+    html += '<td><button class="btn-del" onclick="deleteChild(\''+esc(list[i].id)+'\')">削除</button></td></tr>';
+  }
+  if (!html) html = '<tr><td colspan="3" style="text-align:center;color:#999">子供の登録なし</td></tr>';
+  tb.innerHTML = html;
+}
+
+function submitChild(e) {
+  e.preventDefault();
+  var staffId = document.getElementById('child-staff').value;
+  if (!staffId) return;
+  var name = document.getElementById('cf-name').value.trim();
+  if (!name) return;
+  var id = 'C' + Date.now();
+  children.push({id: id, staffId: staffId, name: name});
+  saveChildren();
+  document.getElementById('cf-name').value = '';
+  renderChildList();
+  renderStaffList();
+  showToast(name + 'を登録しました');
+}
+
+function deleteChild(childId) {
+  var c = null;
+  for (var i=0; i<children.length; i++) { if (children[i].id===childId) { c=children[i]; break; } }
+  if (!c) return;
+  if (!confirm(c.name + 'を削除しますか？')) return;
+  children = children.filter(function(x){return x.id!==childId;});
+  saveChildren();
+  renderChildList();
+  renderStaffList();
+  showToast('削除しました');
+}
+
 // ==================== DATA MANAGEMENT ====================
 function updatePwStatus() {
   var el = document.getElementById('pw-status');
@@ -858,7 +923,7 @@ function updatePwStatus() {
 }
 
 function dataExport() {
-  var data = { staff: staffList, orders: orders, holidays: holidays, history: opHistory, exportDate: fmtDate(new Date()) };
+  var data = { staff: staffList, orders: orders, holidays: holidays, history: opHistory, children: children, exportDate: fmtDate(new Date()) };
   var json = JSON.stringify(data, null, 2);
   downloadFile(json, '給食管理データ_'+fmtDate(new Date())+'.json', 'application/json');
   showToast('エクスポートしました');
@@ -876,7 +941,8 @@ function dataImport() {
       if (data.orders) orders = data.orders;
       if (data.holidays) holidays = data.holidays;
       if (data.history) opHistory = data.history;
-      saveStaff(); saveOrders(); saveHolidays(); saveHistory();
+      if (data.children) children = data.children;
+      saveStaff(); saveOrders(); saveHolidays(); saveHistory(); saveChildren();
       showToast('インポートしました');
       showTab('today');
     } catch(ex) { showToast('ファイル形式が不正です'); }
@@ -886,8 +952,8 @@ function dataImport() {
 
 function dataClear() {
   if (!confirm('全データを削除します。この操作は元に戻せません。\n本当に削除しますか？')) return;
-  staffList=[]; orders={}; holidays=[]; opHistory=[];
-  saveStaff(); saveOrders(); saveHolidays(); saveHistory();
+  staffList=[]; orders={}; holidays=[]; opHistory=[]; children=[];
+  saveStaff(); saveOrders(); saveHolidays(); saveHistory(); saveChildren();
   showToast('全データを削除しました');
   showTab('today');
 }
@@ -955,6 +1021,8 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('staff-search').addEventListener('input', renderStaffList);
   document.getElementById('csv-import').addEventListener('click', importCSV);
   document.getElementById('csv-export').addEventListener('click', exportCSV);
+  document.getElementById('child-staff').addEventListener('change', renderChildList);
+  document.getElementById('child-form').addEventListener('submit', submitChild);
 
   document.getElementById('order-year').addEventListener('change', renderOrderGrid);
   document.getElementById('order-month').addEventListener('change', renderOrderGrid);

@@ -19,6 +19,7 @@
       <button class="tab-btn admin-only" data-tab="holiday" style="display:none">休日マスタ</button>
       <button class="tab-btn admin-only" data-tab="backup" style="display:none">データ管理</button>
       <button class="tab-btn tab-btn-admin" id="admin-toggle">管理者</button>
+      <a href="hoikuen/index.html" class="nav-link">保育園食へ</a>
     </nav>
   </header>
 
@@ -137,10 +138,28 @@
           <button class="btn btn-outline" id="csv-export">CSV出力</button>
         </div>
       </div>
+      <div class="card admin-only" style="display:none">
+        <h3>子供管理（保育園）</h3>
+        <div class="control-row">
+          <label>職員:
+            <select id="child-staff"><option value="">-- 選択 --</option></select>
+          </label>
+        </div>
+        <div id="child-manage" style="display:none">
+          <form id="child-form" class="inline-form">
+            <input type="text" id="cf-name" placeholder="子供の名前" required>
+            <button type="submit" class="btn">追加</button>
+          </form>
+          <table class="data-table" style="margin-top:10px">
+            <thead><tr><th>ID</th><th>名前</th><th>操作</th></tr></thead>
+            <tbody id="child-list"></tbody>
+          </table>
+        </div>
+      </div>
       <div class="card">
         <input type="text" id="staff-search" placeholder="検索（ID・氏名・部署）" class="search-input">
         <table class="data-table">
-          <thead><tr><th>ID</th><th>氏名</th><th>部署</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>氏名</th><th>部署</th><th>子供</th><th>操作</th></tr></thead>
           <tbody id="staff-list"></tbody>
         </table>
       </div>

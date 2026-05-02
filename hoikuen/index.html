@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>院内保育園 食事注文管理</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>院内保育園 食事注文管理</h1>
+    <nav id="main-nav">
+      <button class="tab-btn active" data-tab="today">本日の食事</button>
+      <button class="tab-btn" data-tab="order">注文入力</button>
+      <button class="tab-btn" data-tab="report">集計</button>
+      <button class="tab-btn" data-tab="history">入力履歴</button>
+      <a href="../index.html" class="nav-link">職員給食へ</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 本日の食事 -->
+    <section id="tab-today" class="tab-content active">
+      <div class="section-header">
+        <h2>保育園食 注文一覧</h2>
+        <div class="date-selector">
+          <button id="today-prev" class="btn-sm">&lt;</button>
+          <input type="date" id="today-date">
+          <button id="today-next" class="btn-sm">&gt;</button>
+          <button id="today-reset" class="btn-sm">今日</button>
+        </div>
+      </div>
+      <div id="today-holiday-notice" class="notice notice-warning" style="display:none"></div>
+      <div class="meal-cards">
+        <div class="meal-card">
+          <h3>朝食 <span id="mc-b" class="badge">0</span></h3>
+          <table><thead><tr><th>子供名</th><th>保護者</th><th>食種</th></tr></thead>
+          <tbody id="ml-b"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>10時おやつ <span id="mc-s1" class="badge">0</span></h3>
+          <table><thead><tr><th>子供名</th><th>保護者</th><th>食種</th></tr></thead>
+          <tbody id="ml-s1"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>昼食 <span id="mc-l" class="badge">0</span></h3>
+          <table><thead><tr><th>子供名</th><th>保護者</th><th>食種</th></tr></thead>
+          <tbody id="ml-l"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>15時おやつ <span id="mc-s2" class="badge">0</span></h3>
+          <table><thead><tr><th>子供名</th><th>保護者</th><th>食種</th></tr></thead>
+          <tbody id="ml-s2"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>夕食 <span id="mc-d" class="badge">0</span></h3>
+          <table><thead><tr><th>子供名</th><th>保護者</th><th>食種</th></tr></thead>
+          <tbody id="ml-d"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 注文入力 -->
+    <section id="tab-order" class="tab-content">
+      <h2>注文入力</h2>
+      <div class="order-controls">
+        <div class="control-row">
+          <label>年月:
+            <select id="order-year"></select>年
+            <select id="order-month"></select>月
+          </label>
+          <label>保護者:
+            <select id="order-staff"><option value="">-- 選択 --</option></select>
+          </label>
+          <label>子供:
+            <select id="order-child"><option value="">-- 選択 --</option></select>
+          </label>
+        </div>
+        <div class="control-row">
+          <button class="btn btn-outline" id="bulk-weekday-all">平日全食セット</button>
+          <button class="btn btn-outline" id="bulk-copy-prev">前月コピー</button>
+          <button class="btn btn-danger-outline" id="bulk-clear">全クリア</button>
+        </div>
+        <div class="control-row">
+          <span class="help-text">クリックで切替: − → 普(普通食) → き(きざみ食) → −</span>
+        </div>
+      </div>
+      <div id="order-grid-wrap">
+        <p class="placeholder-msg">保護者と子供を選択してください</p>
+      </div>
+      <div id="order-summary" style="display:none">
+        <strong>合計:</strong>
+        朝食 <span id="os-b">0</span> / 10時おやつ <span id="os-s1">0</span> / 昼食 <span id="os-l">0</span> / 15時おやつ <span id="os-s2">0</span> / 夕食 <span id="os-d">0</span>
+      </div>
+      <div id="order-actions" style="display:none" class="order-actions">
+        <span id="order-status" class="order-status"></span>
+        <button class="btn" id="order-confirm">確定</button>
+        <button class="btn btn-outline" id="order-edit">修正</button>
+      </div>
+    </section>
+
+    <!-- 集計 -->
+    <section id="tab-report" class="tab-content">
+      <h2>月次集計</h2>
+      <div class="control-row">
+        <label>年月:
+          <select id="rpt-year"></select>年
+          <select id="rpt-month"></select>月
+        </label>
+        <button class="btn" id="rpt-run">集計実行</button>
+        <button class="btn btn-outline" id="rpt-print">印刷</button>
+      </div>
+      <div id="rpt-result"></div>
+    </section>
+
+    <!-- 入力履歴 -->
+    <section id="tab-history" class="tab-content">
+      <h2>入力履歴</h2>
+      <div class="card">
+        <div class="control-row">
+          <label>絞込:
+            <select id="hist-month-filter"><option value="">全期間</option></select>
+          </label>
+          <label>
+            <select id="hist-staff-filter"><option value="">全保護者</option></select>
+          </label>
+        </div>
+        <table class="data-table">
+          <thead><tr><th>日時</th><th>保護者</th><th>子供</th><th>対象月</th><th>操作</th><th>詳細</th></tr></thead>
+          <tbody id="history-list"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
