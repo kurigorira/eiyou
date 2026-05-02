@@ -432,13 +432,18 @@ function renderOrderGrid() {
   document.getElementById('os-dd').textContent = totDD;
   updateOrderButtons();
 
+  var MEAL_NAMES = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'};
   var checks = wrap.querySelectorAll('input[type="checkbox"]');
   for (var i=0; i<checks.length; i++) {
     checks[i].addEventListener('change', function() {
       var sid = document.getElementById('order-staff').value;
       var cy = parseInt(document.getElementById('order-year').value);
       var cm = parseInt(document.getElementById('order-month').value);
-      setOrder(sid, cy, cm, parseInt(this.getAttribute('data-d')), this.getAttribute('data-m'), this.checked);
+      var day = parseInt(this.getAttribute('data-d'));
+      var meal = this.getAttribute('data-m');
+      setOrder(sid, cy, cm, day, meal, this.checked);
+      var act = this.checked ? '追加' : '取消';
+      addHistory(sid, cy+'-'+pad(cm), '変更', day+'日 '+MEAL_NAMES[meal]+' '+act);
       orderDirty = true;
       updateOrderSummary(cy, cm, sid);
       updateOrderButtons();
