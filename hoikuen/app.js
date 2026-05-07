@@ -1,5 +1,6 @@
 'use strict';
 
+var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 var MEAL_KEYS = ['b','s1','l','s2','d'];
 var MEAL_NAMES = {b:'朝食',s1:'10時おやつ',l:'昼食',s2:'15時おやつ',d:'夕食'};
@@ -11,21 +12,35 @@ var children = [];
 var holidays = [];
 var orders = {};
 var opHistory = [];
+var config = {};
+var hoikuConfirmed = {};
 var toastTimer = null;
 var orderLocked = true;
 var orderDirty = false;
 
-function loadData() {
-  try {
-    staffList = JSON.parse(localStorage.getItem('eiyou_staff') || '[]');
-    children = JSON.parse(localStorage.getItem('eiyou_children') || '[]');
-    holidays = JSON.parse(localStorage.getItem('eiyou_holidays') || '[]');
-    orders = JSON.parse(localStorage.getItem('eiyou_hoiku_orders') || '{}');
-    opHistory = JSON.parse(localStorage.getItem('eiyou_hoiku_history') || '[]');
-  } catch(e) { staffList=[]; children=[]; holidays=[]; orders={}; opHistory=[]; }
+function apiSave(key, data) {
+  fetch(API_URL + '?key=' + key, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).catch(function(e) { console.error('Save failed:', key, e); });
 }
-function saveOrders() { localStorage.setItem('eiyou_hoiku_orders', JSON.stringify(orders)); }
-function saveHistory() { localStorage.setItem('eiyou_hoiku_history', JSON.stringify(opHistory)); }
+
+function loadData() {
+  return fetch(API_URL + '?key=all').then(function(r) { return r.json(); }).then(function(d) {
+    staffList = d.staff || [];
+    children = d.children || [];
+    holidays = d.holidays || [];
+    orders = d.hoiku_orders || {};
+    opHistory = d.hoiku_history || [];
+    config = d.config || {};
+    hoikuConfirmed = d.hoiku_confirmed || {};
+  });
+}
+
+function saveOrders() { apiSave('hoiku_orders', orders); }
+function saveHistory() { apiSave('hoiku_history', opHistory); }
+function saveConfirmed() { apiSave('hoiku_confirmed', hoikuConfirmed); }
 
 function addHistory(staffId, childId, yearMonth, action, detail) {
   var s = getStaffById(staffId);
@@ -101,19 +116,17 @@ function setOrder(childId, y, m, d, meal, val) {
   orders[key][childId][d][meal] = val;
 }
 
-function getConfirmKey(childId, y, m) {
-  return 'eiyou_hoiku_confirmed_'+y+'-'+pad(m)+'_'+childId;
-}
 function getOrderStatus(childId, y, m) {
-  return localStorage.getItem(getConfirmKey(childId, y, m)) === '1';
+  var sKey = y+'-'+pad(m)+'_'+childId;
+  return hoikuConfirmed[sKey] === true;
 }
 function setOrderConfirmed(childId, y, m, val) {
-  if (val) localStorage.setItem(getConfirmKey(childId, y, m), '1');
-  else localStorage.removeItem(getConfirmKey(childId, y, m));
+  var sKey = y+'-'+pad(m)+'_'+childId;
+  if (val) hoikuConfirmed[sKey] = true; else delete hoikuConfirmed[sKey];
+  saveConfirmed();
 }
 
-function getEditPassword() { return localStorage.getItem('eiyou_edit_password') || ''; }
-
+function getEditPassword() { return config.password || ''; }
 function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function typeLabel(v) { return v==='normal'?'普通食':v==='kizami'?'きざみ食':''; }
 
@@ -240,17 +253,15 @@ function renderOrderGrid() {
   }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
-  var confirmed = getOrderStatus(childId, y, m);
-  orderLocked = confirmed;
+  var cfm = getOrderStatus(childId, y, m);
+  orderLocked = cfm;
   orderDirty = false;
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
   var disabledCls = orderLocked ? ' disabled' : '';
-
   var html = '<table class="order-table"><thead><tr><th>日</th><th>曜</th>';
   for (var k=0; k<MEAL_KEYS.length; k++) html += '<th>'+MEAL_NAMES[MEAL_KEYS[k]]+'</th>';
   html += '<th>備考</th></tr></thead><tbody>';
-
   var totals = {b:0,s1:0,l:0,s2:0,d:0};
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
@@ -281,134 +292,7 @@ function renderOrderGrid() {
 
   var cells = wrap.querySelectorAll('.meal-cell:not(.disabled)');
   for (var i=0; i<cells.length; i++) {
-    cells[i].addEventListener('click', function() {
-      var day = parseInt(this.getAttribute('data-d'));
-      var meal = this.getAttribute('data-m');
-      var cid = document.getElementById('order-child').value;
-      var sid = document.getElementById('order-staff').value;
-      var cy = parseInt(document.getElementById('order-year').value);
-      var cm = parseInt(document.getElementById('order-month').value);
-      var cur = getOrder(cid, cy, cm, day)[meal] || '';
-      var idx = TYPE_CYCLE.indexOf(cur);
-      var next = TYPE_CYCLE[(idx + 1) % TYPE_CYCLE.length];
-      setOrder(cid, cy, cm, day, meal, next);
-      this.textContent = TYPE_LABELS[next];
-      this.className = 'meal-cell' + (next ? ' '+next : '');
-      var detail = day+'日 '+MEAL_NAMES[meal]+' '+(next ? typeLabel(next) : '取消');
-      addHistory(sid, cid, cy+'-'+pad(cm), '変更', detail);
-      orderDirty = true;
-      updateSummary(cy, cm, cid);
-      updateOrderButtons();
-    });
-  }
-}
-
-function updateSummary(y, m, childId) {
-  var days = daysInMonth(y, m);
-  var totals = {b:0,s1:0,l:0,s2:0,d:0};
-  for (var d=1; d<=days; d++) {
-    var o = getOrder(childId, y, m, d);
-    for (var k=0; k<MEAL_KEYS.length; k++) { if (o[MEAL_KEYS[k]]) totals[MEAL_KEYS[k]]++; }
-  }
-  for (var k=0; k<MEAL_KEYS.length; k++) {
-    document.getElementById('os-'+MEAL_KEYS[k]).textContent = totals[MEAL_KEYS[k]];
-  }
-}
-
-function updateOrderButtons() {
-  var childId = document.getElementById('order-child').value;
-  if (!childId) return;
-  var y = parseInt(document.getElementById('order-year').value);
-  var m = parseInt(document.getElementById('order-month').value);
-  var confirmed = getOrderStatus(childId, y, m);
-  var status = document.getElementById('order-status');
-  var confirmBtn = document.getElementById('order-confirm');
-  var editBtn = document.getElementById('order-edit');
-
-  if (confirmed && !orderDirty) {
-    status.textContent = '確定済み';
-    status.className = 'order-status confirmed';
-    confirmBtn.style.display = 'none';
-    editBtn.style.display = '';
-  } else if (orderDirty) {
-    status.textContent = '未保存の変更があります';
-    status.className = 'order-status unsaved';
-    confirmBtn.style.display = '';
-    confirmBtn.textContent = '確定';
-    editBtn.style.display = 'none';
-  } else {
-    status.textContent = '未確定';
-    status.className = 'order-status editing';
-    confirmBtn.style.display = '';
-    confirmBtn.textContent = '確定';
-    editBtn.style.display = 'none';
-  }
-}
-
-function getSummaryText(childId, y, m) {
-  var days = daysInMonth(y, m);
-  var t = {b:0,s1:0,l:0,s2:0,d:0};
-  for (var d=1; d<=days; d++) {
-    var o = getOrder(childId, y, m, d);
-    for (var k=0; k<MEAL_KEYS.length; k++) { if (o[MEAL_KEYS[k]]) t[MEAL_KEYS[k]]++; }
-  }
-  return '朝'+t.b+' 10おや'+t.s1+' 昼'+t.l+' 15おや'+t.s2+' 夕'+t.d;
-}
-
-function confirmOrder() {
-  var childId = document.getElementById('order-child').value;
-  var staffId = document.getElementById('order-staff').value;
-  if (!childId) return;
-  var y = parseInt(document.getElementById('order-year').value);
-  var m = parseInt(document.getElementById('order-month').value);
-  var was = getOrderStatus(childId, y, m);
-  saveOrders();
-  setOrderConfirmed(childId, y, m, true);
-  addHistory(staffId, childId, y+'-'+pad(m), was?'修正確定':'確定', getSummaryText(childId,y,m));
-  orderLocked = true;
-  orderDirty = false;
-  setCellsDisabled(true);
-  updateOrderButtons();
-  showToast(y+'年'+m+'月の注文を確定しました');
-}
-
-function editOrder() {
-  var childId = document.getElementById('order-child').value;
-  var staffId = document.getElementById('order-staff').value;
-  if (!childId) return;
-  var savedPw = getEditPassword();
-  if (savedPw) {
-    var input = prompt('編集パスワードを入力してください');
-    if (input === null) return;
-    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
-  }
-  var y = parseInt(document.getElementById('order-year').value);
-  var m = parseInt(document.getElementById('order-month').value);
-  addHistory(staffId, childId, y+'-'+pad(m), '修正開始', '');
-  orderLocked = false;
-  orderDirty = false;
-  setCellsDisabled(false);
-  var status = document.getElementById('order-status');
-  status.textContent = '修正中';
-  status.className = 'order-status editing';
-  document.getElementById('order-confirm').style.display = '';
-  document.getElementById('order-confirm').textContent = '確定';
-  document.getElementById('order-edit').style.display = 'none';
-  showToast('修正モードに切り替えました');
-}
-
-function setCellsDisabled(disabled) {
-  var cells = document.querySelectorAll('#order-grid-wrap .meal-cell');
-  for (var i=0; i<cells.length; i++) {
-    if (disabled) cells[i].classList.add('disabled');
-    else cells[i].classList.remove('disabled');
-  }
-  if (!disabled) {
-    var wrap = document.getElementById('order-grid-wrap');
-    var activeCells = wrap.querySelectorAll('.meal-cell:not(.disabled)');
-    for (var i=0; i<activeCells.length; i++) {
-      activeCells[i].addEventListener('click', createCellClickHandler());
-    }
+    cells[i].addEventListener('click', createCellClickHandler());
   }
 }
 
@@ -434,6 +318,102 @@ function createCellClickHandler() {
   };
 }
 
+function updateSummary(y, m, childId) {
+  var days = daysInMonth(y, m);
+  var totals = {b:0,s1:0,l:0,s2:0,d:0};
+  for (var d=1; d<=days; d++) {
+    var o = getOrder(childId, y, m, d);
+    for (var k=0; k<MEAL_KEYS.length; k++) { if (o[MEAL_KEYS[k]]) totals[MEAL_KEYS[k]]++; }
+  }
+  for (var k=0; k<MEAL_KEYS.length; k++) {
+    document.getElementById('os-'+MEAL_KEYS[k]).textContent = totals[MEAL_KEYS[k]];
+  }
+}
+
+function updateOrderButtons() {
+  var childId = document.getElementById('order-child').value;
+  if (!childId) return;
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  var cfm = getOrderStatus(childId, y, m);
+  var status = document.getElementById('order-status');
+  var confirmBtn = document.getElementById('order-confirm');
+  var editBtn = document.getElementById('order-edit');
+  if (cfm && !orderDirty) {
+    status.textContent = '確定済み'; status.className = 'order-status confirmed';
+    confirmBtn.style.display = 'none'; editBtn.style.display = '';
+  } else if (orderDirty) {
+    status.textContent = '未保存の変更があります'; status.className = 'order-status unsaved';
+    confirmBtn.style.display = ''; confirmBtn.textContent = '確定'; editBtn.style.display = 'none';
+  } else {
+    status.textContent = '未確定'; status.className = 'order-status editing';
+    confirmBtn.style.display = ''; confirmBtn.textContent = '確定'; editBtn.style.display = 'none';
+  }
+}
+
+function getSummaryText(childId, y, m) {
+  var days = daysInMonth(y, m);
+  var t = {b:0,s1:0,l:0,s2:0,d:0};
+  for (var d=1; d<=days; d++) {
+    var o = getOrder(childId, y, m, d);
+    for (var k=0; k<MEAL_KEYS.length; k++) { if (o[MEAL_KEYS[k]]) t[MEAL_KEYS[k]]++; }
+  }
+  return '朝'+t.b+' 10おや'+t.s1+' 昼'+t.l+' 15おや'+t.s2+' 夕'+t.d;
+}
+
+function confirmOrder() {
+  var childId = document.getElementById('order-child').value;
+  var staffId = document.getElementById('order-staff').value;
+  if (!childId) return;
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  var was = getOrderStatus(childId, y, m);
+  saveOrders();
+  setOrderConfirmed(childId, y, m, true);
+  addHistory(staffId, childId, y+'-'+pad(m), was?'修正確定':'確定', getSummaryText(childId,y,m));
+  orderLocked = true; orderDirty = false;
+  setCellsDisabled(true);
+  updateOrderButtons();
+  showToast(y+'年'+m+'月の注文を確定しました');
+}
+
+function editOrder() {
+  var childId = document.getElementById('order-child').value;
+  var staffId = document.getElementById('order-staff').value;
+  if (!childId) return;
+  var savedPw = getEditPassword();
+  if (savedPw) {
+    var input = prompt('編集パスワードを入力してください');
+    if (input === null) return;
+    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
+  }
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  addHistory(staffId, childId, y+'-'+pad(m), '修正開始', '');
+  orderLocked = false; orderDirty = false;
+  setCellsDisabled(false);
+  var status = document.getElementById('order-status');
+  status.textContent = '修正中'; status.className = 'order-status editing';
+  document.getElementById('order-confirm').style.display = '';
+  document.getElementById('order-confirm').textContent = '確定';
+  document.getElementById('order-edit').style.display = 'none';
+  showToast('修正モードに切り替えました');
+}
+
+function setCellsDisabled(disabled) {
+  var cells = document.querySelectorAll('#order-grid-wrap .meal-cell');
+  for (var i=0; i<cells.length; i++) {
+    if (disabled) cells[i].classList.add('disabled');
+    else cells[i].classList.remove('disabled');
+  }
+  if (!disabled) {
+    var activeCells = document.querySelectorAll('#order-grid-wrap .meal-cell:not(.disabled)');
+    for (var i=0; i<activeCells.length; i++) {
+      activeCells[i].addEventListener('click', createCellClickHandler());
+    }
+  }
+}
+
 function requireUnlocked() {
   if (orderLocked) { showToast('修正ボタンを押してから操作してください'); return false; }
   return true;
@@ -449,9 +429,7 @@ function bulkSetWeekdayAll() {
   var days = daysInMonth(y, m);
   for (var d=1; d<=days; d++) {
     if (isWorkday(y, m, d)) {
-      for (var k=0; k<MEAL_KEYS.length; k++) {
-        setOrder(childId, y, m, d, MEAL_KEYS[k], 'normal');
-      }
+      for (var k=0; k<MEAL_KEYS.length; k++) setOrder(childId, y, m, d, MEAL_KEYS[k], 'normal');
     }
   }
   addHistory(staffId, childId, y+'-'+pad(m), '一括操作', '平日全食セット（普通食）');
@@ -467,8 +445,7 @@ function bulkCopyPrev() {
   if (!requireUnlocked()) return;
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
-  var py = m===1 ? y-1 : y;
-  var pm = m===1 ? 12 : m-1;
+  var py = m===1 ? y-1 : y; var pm = m===1 ? 12 : m-1;
   var prevKey = py+'-'+pad(pm);
   if (!orders[prevKey] || !orders[prevKey][childId]) { showToast('前月のデータがありません'); return; }
   var days = daysInMonth(y, m);
@@ -497,18 +474,15 @@ function bulkClear() {
   if (orders[key] && orders[key][childId]) delete orders[key][childId];
   setOrderConfirmed(childId, y, m, false);
   addHistory(staffId, childId, y+'-'+pad(m), 'クリア', '全注文を削除');
-  orderDirty = false;
-  orderLocked = false;
+  orderDirty = false; orderLocked = false;
   renderOrderGridKeepUnlocked();
   showToast('クリアしました');
 }
 
 function renderOrderGridKeepUnlocked() {
-  var saveLocked = orderLocked;
-  var saveDirty = orderDirty;
+  var saveLocked = orderLocked; var saveDirty = orderDirty;
   renderOrderGrid();
-  orderLocked = saveLocked;
-  orderDirty = saveDirty;
+  orderLocked = saveLocked; orderDirty = saveDirty;
   setCellsDisabled(orderLocked);
   updateOrderButtons();
 }
@@ -533,13 +507,11 @@ function runReport() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
-
   var totals = {b:0,s1:0,l:0,s2:0,d:0};
   var normalTotals = {b:0,s1:0,l:0,s2:0,d:0};
   var kizamiTotals = {b:0,s1:0,l:0,s2:0,d:0};
   var dailyData = [];
   var childRows = [];
-
   for (var d=1; d<=days; d++) {
     var dayT = {b:0,s1:0,l:0,s2:0,d:0};
     for (var i=0; i<children.length; i++) {
@@ -547,23 +519,16 @@ function runReport() {
       var o = getOrder(c.id, y, m, d);
       for (var k=0; k<MEAL_KEYS.length; k++) {
         var mk = MEAL_KEYS[k];
-        if (o[mk]) {
-          dayT[mk]++;
-          totals[mk]++;
-          if (o[mk]==='normal') normalTotals[mk]++;
-          else if (o[mk]==='kizami') kizamiTotals[mk]++;
+        if (o[mk]) { dayT[mk]++; totals[mk]++;
+          if (o[mk]==='normal') normalTotals[mk]++; else if (o[mk]==='kizami') kizamiTotals[mk]++;
         }
       }
     }
     dailyData.push({day:d, dow:dayOfWeek(y,m,d), t:dayT});
   }
-
   for (var i=0; i<children.length; i++) {
-    var c = children[i];
-    var s = getStaffById(c.staffId);
-    var ct = {b:0,s1:0,l:0,s2:0,d:0};
-    var cn = {b:0,s1:0,l:0,s2:0,d:0};
-    var ck = {b:0,s1:0,l:0,s2:0,d:0};
+    var c = children[i]; var s = getStaffById(c.staffId);
+    var ct = {b:0,s1:0,l:0,s2:0,d:0}; var cn = {b:0,s1:0,l:0,s2:0,d:0}; var ck = {b:0,s1:0,l:0,s2:0,d:0};
     for (var d=1; d<=days; d++) {
       var o = getOrder(c.id, y, m, d);
       for (var k=0; k<MEAL_KEYS.length; k++) {
@@ -571,16 +536,10 @@ function runReport() {
         if (o[mk]) { ct[mk]++; if(o[mk]==='normal') cn[mk]++; else ck[mk]++; }
       }
     }
-    var total = 0;
-    for (var k=0; k<MEAL_KEYS.length; k++) total += ct[MEAL_KEYS[k]];
-    if (total > 0) {
-      childRows.push({childName:c.name, parentName:s?s.name:c.staffId, t:ct, n:cn, k:ck});
-    }
+    var total = 0; for (var k=0; k<MEAL_KEYS.length; k++) total += ct[MEAL_KEYS[k]];
+    if (total > 0) childRows.push({childName:c.name, parentName:s?s.name:c.staffId, t:ct, n:cn, k:ck});
   }
-
-  var totalAll = 0;
-  for (var k=0; k<MEAL_KEYS.length; k++) totalAll += totals[MEAL_KEYS[k]];
-
+  var totalAll = 0; for (var k=0; k<MEAL_KEYS.length; k++) totalAll += totals[MEAL_KEYS[k]];
   var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 月次合計</h3>';
   html += '<table class="rpt-table"><thead><tr><th>食事</th><th>普通食</th><th>きざみ食</th><th>合計</th></tr></thead><tbody>';
   for (var k=0; k<MEAL_KEYS.length; k++) {
@@ -588,10 +547,8 @@ function runReport() {
     html += '<tr><td>'+MEAL_NAMES[mk]+'</td><td>'+normalTotals[mk]+'</td><td>'+kizamiTotals[mk]+'</td><td>'+totals[mk]+'</td></tr>';
   }
   html += '</tbody><tfoot><tr><td>合計</td>';
-  var nAll=0, kAll=0;
-  for (var k=0; k<MEAL_KEYS.length; k++) { nAll+=normalTotals[MEAL_KEYS[k]]; kAll+=kizamiTotals[MEAL_KEYS[k]]; }
+  var nAll=0, kAll=0; for (var k=0; k<MEAL_KEYS.length; k++) { nAll+=normalTotals[MEAL_KEYS[k]]; kAll+=kizamiTotals[MEAL_KEYS[k]]; }
   html += '<td>'+nAll+'</td><td>'+kAll+'</td><td>'+totalAll+'</td></tr></tfoot></table></div>';
-
   html += '<div class="rpt-section"><h3>子供別集計</h3>';
   html += '<table class="rpt-table"><thead><tr><th>子供名</th><th>保護者</th>';
   for (var k=0; k<MEAL_KEYS.length; k++) html += '<th>'+MEAL_NAMES[MEAL_KEYS[k]]+'</th>';
@@ -601,38 +558,28 @@ function runReport() {
     html += '<tr><td>'+esc(cr.childName)+'</td><td>'+esc(cr.parentName)+'</td>';
     var rowTotal = 0;
     for (var k=0; k<MEAL_KEYS.length; k++) {
-      var mk = MEAL_KEYS[k];
-      var detail = '';
+      var mk = MEAL_KEYS[k]; var detail = '';
       if (cr.n[mk]>0 && cr.k[mk]>0) detail = cr.n[mk]+'普/'+cr.k[mk]+'き';
-      else if (cr.k[mk]>0) detail = cr.t[mk]+'(き)';
-      else detail = ''+cr.t[mk];
-      html += '<td>'+detail+'</td>';
-      rowTotal += cr.t[mk];
+      else if (cr.k[mk]>0) detail = cr.t[mk]+'(き)'; else detail = ''+cr.t[mk];
+      html += '<td>'+detail+'</td>'; rowTotal += cr.t[mk];
     }
     html += '<td>'+rowTotal+'</td></tr>';
   }
   html += '</tbody></table></div>';
-
   html += '<div class="rpt-section"><h3>日別内訳</h3>';
   html += '<table class="rpt-table"><thead><tr><th>日</th><th>曜</th>';
   for (var k=0; k<MEAL_KEYS.length; k++) html += '<th>'+MEAL_NAMES[MEAL_KEYS[k]]+'</th>';
   html += '<th>合計</th></tr></thead><tbody>';
   for (var i=0; i<dailyData.length; i++) {
-    var dy = dailyData[i];
-    var ds = y+'-'+pad(m)+'-'+pad(dy.day);
-    var hName = getHolidayName(ds);
-    var label = WEEKDAYS[dy.dow];
+    var dy = dailyData[i]; var ds = y+'-'+pad(m)+'-'+pad(dy.day);
+    var hName = getHolidayName(ds); var label = WEEKDAYS[dy.dow];
     if (hName) label += '('+hName+')';
     var dayTotal = 0;
     html += '<tr><td>'+dy.day+'</td><td style="text-align:center">'+label+'</td>';
-    for (var k=0; k<MEAL_KEYS.length; k++) {
-      html += '<td>'+dy.t[MEAL_KEYS[k]]+'</td>';
-      dayTotal += dy.t[MEAL_KEYS[k]];
-    }
+    for (var k=0; k<MEAL_KEYS.length; k++) { html += '<td>'+dy.t[MEAL_KEYS[k]]+'</td>'; dayTotal += dy.t[MEAL_KEYS[k]]; }
     html += '<td>'+dayTotal+'</td></tr>';
   }
   html += '</tbody></table></div>';
-
   document.getElementById('rpt-result').innerHTML = html;
 }
 
@@ -641,23 +588,17 @@ function renderHistory() {
   populateHistoryFilters();
   var monthF = document.getElementById('hist-month-filter').value;
   var staffF = document.getElementById('hist-staff-filter').value;
-
   var tb = document.getElementById('history-list');
-  var html = '';
-  var count = 0;
+  var html = ''; var count = 0;
   for (var i=0; i<opHistory.length && count<200; i++) {
     var h = opHistory[i];
     if (monthF && h.yearMonth !== monthF) continue;
     if (staffF && h.staffId !== staffF) continue;
     html += '<tr>';
     html += '<td style="white-space:nowrap">'+esc(h.timestamp)+'</td>';
-    html += '<td>'+esc(h.staffName)+'</td>';
-    html += '<td>'+esc(h.childName)+'</td>';
-    html += '<td>'+esc(h.yearMonth)+'</td>';
-    html += '<td>'+esc(h.action)+'</td>';
-    html += '<td>'+esc(h.detail)+'</td>';
-    html += '</tr>';
-    count++;
+    html += '<td>'+esc(h.staffName)+'</td><td>'+esc(h.childName)+'</td>';
+    html += '<td>'+esc(h.yearMonth)+'</td><td>'+esc(h.action)+'</td><td>'+esc(h.detail)+'</td>';
+    html += '</tr>'; count++;
   }
   if (!html) html = '<tr><td colspan="6" style="text-align:center;color:#999">履歴なし</td></tr>';
   tb.innerHTML = html;
@@ -686,40 +627,44 @@ function populateHistoryFilters() {
 
 // ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', function() {
-  loadData();
+  loadData().then(function() {
+    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { showTab(this.getAttribute('data-tab')); });
+    });
 
-  document.querySelectorAll('.tab-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() { showTab(this.getAttribute('data-tab')); });
+    var todayInput = document.getElementById('today-date');
+    todayInput.value = fmtDate(new Date());
+    todayInput.addEventListener('change', renderToday);
+    document.getElementById('today-prev').addEventListener('click', function() {
+      var d = new Date(todayInput.value); d.setDate(d.getDate()-1); todayInput.value=fmtDate(d); renderToday();
+    });
+    document.getElementById('today-next').addEventListener('click', function() {
+      var d = new Date(todayInput.value); d.setDate(d.getDate()+1); todayInput.value=fmtDate(d); renderToday();
+    });
+    document.getElementById('today-reset').addEventListener('click', function() {
+      todayInput.value = fmtDate(new Date()); renderToday();
+    });
+
+    document.getElementById('order-year').addEventListener('change', renderOrderGrid);
+    document.getElementById('order-month').addEventListener('change', renderOrderGrid);
+    document.getElementById('order-staff').addEventListener('change', populateOrderChild);
+    document.getElementById('order-child').addEventListener('change', renderOrderGrid);
+    document.getElementById('bulk-weekday-all').addEventListener('click', bulkSetWeekdayAll);
+    document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
+    document.getElementById('bulk-clear').addEventListener('click', bulkClear);
+    document.getElementById('order-confirm').addEventListener('click', confirmOrder);
+    document.getElementById('order-edit').addEventListener('click', editOrder);
+
+    document.getElementById('rpt-run').addEventListener('click', runReport);
+    document.getElementById('rpt-print').addEventListener('click', function() { window.print(); });
+
+    document.getElementById('hist-month-filter').addEventListener('change', renderHistory);
+    document.getElementById('hist-staff-filter').addEventListener('change', renderHistory);
+
+    renderToday();
+  }).catch(function(err) {
+    document.getElementById('toast').textContent = 'データ読み込みエラー: ' + err.message;
+    document.getElementById('toast').classList.add('show');
+    document.getElementById('toast').style.opacity = '1';
   });
-
-  var todayInput = document.getElementById('today-date');
-  todayInput.value = fmtDate(new Date());
-  todayInput.addEventListener('change', renderToday);
-  document.getElementById('today-prev').addEventListener('click', function() {
-    var d = new Date(todayInput.value); d.setDate(d.getDate()-1); todayInput.value=fmtDate(d); renderToday();
-  });
-  document.getElementById('today-next').addEventListener('click', function() {
-    var d = new Date(todayInput.value); d.setDate(d.getDate()+1); todayInput.value=fmtDate(d); renderToday();
-  });
-  document.getElementById('today-reset').addEventListener('click', function() {
-    todayInput.value = fmtDate(new Date()); renderToday();
-  });
-
-  document.getElementById('order-year').addEventListener('change', renderOrderGrid);
-  document.getElementById('order-month').addEventListener('change', renderOrderGrid);
-  document.getElementById('order-staff').addEventListener('change', populateOrderChild);
-  document.getElementById('order-child').addEventListener('change', renderOrderGrid);
-  document.getElementById('bulk-weekday-all').addEventListener('click', bulkSetWeekdayAll);
-  document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
-  document.getElementById('bulk-clear').addEventListener('click', bulkClear);
-  document.getElementById('order-confirm').addEventListener('click', confirmOrder);
-  document.getElementById('order-edit').addEventListener('click', editOrder);
-
-  document.getElementById('rpt-run').addEventListener('click', runReport);
-  document.getElementById('rpt-print').addEventListener('click', function() { window.print(); });
-
-  document.getElementById('hist-month-filter').addEventListener('change', renderHistory);
-  document.getElementById('hist-staff-filter').addEventListener('change', renderHistory);
-
-  renderToday();
 });
