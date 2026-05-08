@@ -740,6 +740,28 @@ function runReport() {
   document.getElementById('rpt-result').innerHTML = html;
 }
 
+function exportReportCSV() {
+  var y = parseInt(document.getElementById('rpt-year').value);
+  var m = parseInt(document.getElementById('rpt-month').value);
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var csv = '﻿職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,合計\n';
+  for (var i=0; i<sorted.length; i++) {
+    var s = sorted[i];
+    var t = {b:0,l:0,d:0,dd:0};
+    for (var d=1; d<=days; d++) {
+      var o = getOrder(s.id, y, m, d);
+      if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
+    }
+    var total = t.b + t.l + t.d + t.dd;
+    if (total === 0) continue;
+    csv += '"'+s.id.replace(/"/g,'""')+'","'+s.name.replace(/"/g,'""')+'","'+s.dept.replace(/"/g,'""')+'",';
+    csv += t.b+','+t.l+','+t.d+','+t.dd+','+total+'\n';
+  }
+  downloadFile(csv, '月間注文集計_'+y+'年'+pad(m)+'月.csv', 'text/csv;charset=utf-8');
+  showToast('CSVを出力しました');
+}
+
 // ==================== HISTORY TAB ====================
 function renderHistory() {
   populateHistoryFilters();
@@ -1069,6 +1091,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('order-edit').addEventListener('click', editOrder);
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
+    document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 
     document.getElementById('hist-month-filter').addEventListener('change', renderHistory);
