@@ -544,25 +544,30 @@ function confirmOrder() {
 function editOrder() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) return;
-  var savedPw = getEditPassword();
-  if (savedPw) {
-    var input = prompt('編集パスワードを入力してください');
-    if (input === null) return;
-    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
-  }
-  var y = parseInt(document.getElementById('order-year').value);
-  var m = parseInt(document.getElementById('order-month').value);
-  addHistory(staffId, y+'-'+pad(m), '修正開始', '');
-  orderLocked = false;
-  orderDirty = false;
-  setCheckboxDisabled(false);
-  var status = document.getElementById('order-status');
-  status.textContent = '修正中';
-  status.className = 'order-status editing';
-  document.getElementById('order-confirm').style.display = '';
-  document.getElementById('order-confirm').textContent = '確定';
-  document.getElementById('order-edit').style.display = 'none';
-  showToast('修正モードに切り替えました');
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(serverConfig) {
+    config = serverConfig || {};
+    var savedPw = getEditPassword();
+    if (savedPw) {
+      var input = prompt('編集パスワードを入力してください');
+      if (input === null) return;
+      if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
+    }
+    var y = parseInt(document.getElementById('order-year').value);
+    var m = parseInt(document.getElementById('order-month').value);
+    addHistory(staffId, y+'-'+pad(m), '修正開始', '');
+    orderLocked = false;
+    orderDirty = false;
+    setCheckboxDisabled(false);
+    var status = document.getElementById('order-status');
+    status.textContent = '修正中';
+    status.className = 'order-status editing';
+    document.getElementById('order-confirm').style.display = '';
+    document.getElementById('order-confirm').textContent = '確定';
+    document.getElementById('order-edit').style.display = 'none';
+    showToast('修正モードに切り替えました');
+  }).catch(function() {
+    showToast('サーバーとの通信に失敗しました');
+  });
 }
 
 function setCheckboxDisabled(disabled) {
@@ -813,17 +818,22 @@ function populateHistoryFilters() {
 }
 
 function clearHistory() {
-  var savedPw = getEditPassword();
-  if (savedPw) {
-    var input = prompt('管理者パスワードを入力してください');
-    if (input === null) return;
-    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
-  }
-  if (!confirm('履歴を全て削除しますか？')) return;
-  opHistory = [];
-  saveHistory();
-  renderHistory();
-  showToast('履歴を削除しました');
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(serverConfig) {
+    config = serverConfig || {};
+    var savedPw = getEditPassword();
+    if (savedPw) {
+      var input = prompt('管理者パスワードを入力してください');
+      if (input === null) return;
+      if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
+    }
+    if (!confirm('履歴を全て削除しますか？')) return;
+    opHistory = [];
+    saveHistory();
+    renderHistory();
+    showToast('履歴を削除しました');
+  }).catch(function() {
+    showToast('サーバーとの通信に失敗しました');
+  });
 }
 
 // ==================== HOLIDAY TAB ====================
@@ -1018,15 +1028,20 @@ function toggleAdmin() {
     showToast('管理者モードを解除しました');
     return;
   }
-  var savedPw = getEditPassword();
-  if (savedPw) {
-    var input = prompt('管理者パスワードを入力してください');
-    if (input === null) return;
-    if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
-  }
-  adminMode = true;
-  applyAdminMode();
-  showToast('管理者モードに入りました');
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(serverConfig) {
+    config = serverConfig || {};
+    var savedPw = getEditPassword();
+    if (savedPw) {
+      var input = prompt('管理者パスワードを入力してください');
+      if (input === null) return;
+      if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
+    }
+    adminMode = true;
+    applyAdminMode();
+    showToast('管理者モードに入りました');
+  }).catch(function() {
+    showToast('サーバーとの通信に失敗しました');
+  });
 }
 
 function applyAdminMode() {
