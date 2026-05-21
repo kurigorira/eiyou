@@ -207,6 +207,14 @@ function showTab(name) {
 
 // ==================== TODAY TAB ====================
 function renderToday() {
+  fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
+    orders = serverOrders || {};
+    renderTodayInner();
+  }).catch(function() {
+    renderTodayInner();
+  });
+}
+function renderTodayInner() {
   var dateInput = document.getElementById('today-date');
   var ds = dateInput.value;
   if (!ds) { var now=new Date(); ds=fmtDate(now); dateInput.value=ds; }
@@ -426,6 +434,24 @@ function renderOrderGrid() {
     actions.style.display = 'none';
     return;
   }
+  fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
+    orders = serverOrders || {};
+    return fetch(API_URL + '?key=confirmed').then(function(r) { return r.json(); }).then(function(serverConfirmed) {
+      confirmed = serverConfirmed || {};
+    });
+  }).then(function() {
+    renderOrderGridInner();
+  }).catch(function() {
+    renderOrderGridInner();
+  });
+}
+
+function renderOrderGridInner() {
+  var wrap = document.getElementById('order-grid-wrap');
+  var summary = document.getElementById('order-summary');
+  var actions = document.getElementById('order-actions');
+  var staffId = document.getElementById('order-staff').value;
+  if (!staffId) return;
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var cfm = getOrderStatus(staffId, y, m);
@@ -660,11 +686,17 @@ function bulkClear() {
 function renderOrderGridKeepUnlocked() {
   var saveLocked = orderLocked;
   var saveDirty = orderDirty;
-  renderOrderGrid();
+  renderOrderGridDirect();
   orderLocked = saveLocked;
   orderDirty = saveDirty;
   setCheckboxDisabled(orderLocked);
   updateOrderButtons();
+}
+
+function renderOrderGridDirect() {
+  var staffId = document.getElementById('order-staff').value;
+  if (!staffId) return;
+  renderOrderGridInner();
 }
 
 function navigateStaff(dir) {
