@@ -308,6 +308,7 @@ function createCellClickHandler() {
     var idx = TYPE_CYCLE.indexOf(cur);
     var next = TYPE_CYCLE[(idx + 1) % TYPE_CYCLE.length];
     setOrder(cid, cy, cm, day, meal, next);
+    saveOrders();
     this.textContent = TYPE_LABELS[next];
     this.className = 'meal-cell' + (next ? ' '+next : '');
     var detail = day+'日 '+MEAL_NAMES[meal]+' '+(next ? typeLabel(next) : '取消');
@@ -432,6 +433,7 @@ function bulkSetWeekdayAll() {
       for (var k=0; k<MEAL_KEYS.length; k++) setOrder(childId, y, m, d, MEAL_KEYS[k], 'normal');
     }
   }
+  saveOrders();
   addHistory(staffId, childId, y+'-'+pad(m), '一括操作', '平日全食セット（普通食）');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -456,6 +458,7 @@ function bulkCopyPrev() {
     if (!orders[key][childId]) orders[key][childId] = {};
     orders[key][childId][d] = {b:prev.b, s1:prev.s1, l:prev.l, s2:prev.s2, d:prev.d};
   }
+  saveOrders();
   addHistory(staffId, childId, y+'-'+pad(m), '前月コピー', py+'年'+pm+'月からコピー');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -472,6 +475,7 @@ function bulkClear() {
   var m = parseInt(document.getElementById('order-month').value);
   var key = y+'-'+pad(m);
   if (orders[key] && orders[key][childId]) delete orders[key][childId];
+  saveOrders();
   setOrderConfirmed(childId, y, m, false);
   addHistory(staffId, childId, y+'-'+pad(m), 'クリア', '全注文を削除');
   orderDirty = false; orderLocked = false;

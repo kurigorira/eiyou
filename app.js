@@ -474,6 +474,7 @@ function renderOrderGrid() {
       var day = parseInt(this.getAttribute('data-d'));
       var meal = this.getAttribute('data-m');
       setOrder(sid, cy, cm, day, meal, this.checked);
+      saveOrders();
       var act = this.checked ? '追加' : '取消';
       addHistory(sid, cy+'-'+pad(cm), '変更', day+'日 '+MEAL_NAMES[meal]+' '+act);
       orderDirty = true;
@@ -604,6 +605,7 @@ function bulkSetWeekday(meal) {
     if (isWorkday(y, m, d)) setOrder(staffId, y, m, d, meal, true);
   }
   var mealName = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'}[meal];
+  saveOrders();
   addHistory(staffId, y+'-'+pad(m), '一括操作', '平日'+mealName+'セット');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -630,6 +632,7 @@ function bulkCopyPrev() {
       orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd};
     }
   }
+  saveOrders();
   addHistory(staffId, y+'-'+pad(m), '前月コピー', py+'年'+pm+'月からコピー');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -645,6 +648,7 @@ function bulkClear() {
   var m = parseInt(document.getElementById('order-month').value);
   var key = y+'-'+pad(m);
   if (orders[key] && orders[key][staffId]) delete orders[key][staffId];
+  saveOrders();
   setOrderConfirmed(staffId, y, m, false);
   addHistory(staffId, y+'-'+pad(m), 'クリア', '全注文を削除');
   orderDirty = false;
