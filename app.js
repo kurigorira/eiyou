@@ -63,6 +63,22 @@ function loadData() {
 
 function saveStaff() { apiSave('staff', staffList); }
 function saveOrders() { apiSave('orders', orders); }
+function saveOrdersForStaff(staffId, y, m) {
+  var key = y + '-' + pad(m);
+  var partial = {};
+  partial[key] = {};
+  partial[key][staffId] = (orders[key] && orders[key][staffId]) ? orders[key][staffId] : null;
+  apiMerge('orders', partial, 2);
+}
+function apiMerge(key, data, depth) {
+  var url = API_URL + '?key=' + key + '&action=merge';
+  if (depth) url += '&depth=' + depth;
+  fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).catch(function(e) { console.error('Merge failed:', key, e); });
+}
 function saveHolidays() { apiSave('holidays', holidays); }
 function saveHistory() { apiSave('history', opHistory); }
 function saveChildren() { apiSave('children', children); }
@@ -137,7 +153,9 @@ function getOrderStatus(staffId, y, m) {
 function setOrderConfirmed(staffId, y, m, val) {
   var sKey = y+'-'+pad(m)+'_'+staffId;
   if (val) confirmed[sKey] = true; else delete confirmed[sKey];
-  saveConfirmed();
+  var partial = {};
+  partial[sKey] = val ? true : null;
+  apiMerge('confirmed', partial);
 }
 
 function emptyMeal() { return {b:false,l:false,d:false,dd:false}; }
@@ -500,7 +518,7 @@ function renderOrderGridInner() {
       var day = parseInt(this.getAttribute('data-d'));
       var meal = this.getAttribute('data-m');
       setOrder(sid, cy, cm, day, meal, this.checked);
-      saveOrders();
+      saveOrdersForStaff(sid, cy, cm);
       var act = this.checked ? '追加' : '取消';
       addHistory(sid, cy+'-'+pad(cm), '変更', day+'日 '+MEAL_NAMES[meal]+' '+act);
       orderDirty = true;
@@ -556,7 +574,7 @@ function confirmOrder() {
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var wasConfirmed = getOrderStatus(staffId, y, m);
-  saveOrders();
+  saveOrdersForStaff(staffId, y, m);
   setOrderConfirmed(staffId, y, m, true);
   var ym = y+'-'+pad(m);
   var smry = getOrderSummaryText(staffId, y, m);
@@ -631,7 +649,7 @@ function bulkSetWeekday(meal) {
     if (isWorkday(y, m, d)) setOrder(staffId, y, m, d, meal, true);
   }
   var mealName = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'}[meal];
-  saveOrders();
+  saveOrdersForStaff(staffId, y, m);
   addHistory(staffId, y+'-'+pad(m), '一括操作', '平日'+mealName+'セット');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -658,7 +676,7 @@ function bulkCopyPrev() {
       orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd};
     }
   }
-  saveOrders();
+  saveOrdersForStaff(staffId, y, m);
   addHistory(staffId, y+'-'+pad(m), '前月コピー', py+'年'+pm+'月からコピー');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -674,7 +692,7 @@ function bulkClear() {
   var m = parseInt(document.getElementById('order-month').value);
   var key = y+'-'+pad(m);
   if (orders[key] && orders[key][staffId]) delete orders[key][staffId];
-  saveOrders();
+  saveOrdersForStaff(staffId, y, m);
   setOrderConfirmed(staffId, y, m, false);
   addHistory(staffId, y+'-'+pad(m), 'クリア', '全注文を削除');
   orderDirty = false;

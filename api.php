@@ -50,16 +50,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     }
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = file_get_contents('php://input');
-    $decoded = json_decode($input);
+    $decoded = json_decode($input, true);
     if ($decoded === null && $input !== 'null') {
         http_response_code(400);
         echo json_encode(array('error' => 'Invalid JSON'));
         exit;
     }
-    $fp = fopen($file, 'c');
+    $action = isset($_GET['action']) ? $_GET['action'] : '';
+    $fp = fopen($file, 'c+');
     if ($fp && flock($fp, LOCK_EX)) {
-        ftruncate($fp, 0);
-        fwrite($fp, $input);
+        if ($action === 'merge' && is_array($decoded)) {
+            $current = '';
+            $stat = fstat($fp);
+            if ($stat['size'] > 0) {
+                $current = fread($fp, $stat['size']);
+            }
+            $data = json_decode($current, true);
+            if (!is_array($data)) $data = array();
+            $depth = isset($_GET['depth']) ? intval($_GET['depth']) : 1;
+            if ($depth >= 2) {
+                foreach ($decoded as $k1 => $v1) {
+                    if (!isset($data[$k1]) || !is_array($data[$k1])) $data[$k1] = array();
+                    if (is_array($v1)) {
+                        foreach ($v1 as $k2 => $v2) {
+                            if ($v2 === null) {
+                                unset($data[$k1][$k2]);
+                            } else {
+                                $data[$k1][$k2] = $v2;
+                            }
+                        }
+                    }
+                }
+            } else {
+                foreach ($decoded as $k => $v) {
+                    if ($v === null) {
+                        unset($data[$k]);
+                    } else {
+                        $data[$k] = $v;
+                    }
+                }
+            }
+            fseek($fp, 0);
+            ftruncate($fp, 0);
+            fwrite($fp, json_encode($data, JSON_UNESCAPED_UNICODE));
+        } else {
+            ftruncate($fp, 0);
+            fwrite($fp, $input);
+        }
         fflush($fp);
         flock($fp, LOCK_UN);
         fclose($fp);

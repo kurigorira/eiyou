@@ -39,6 +39,22 @@ function loadData() {
 }
 
 function saveOrders() { apiSave('hoiku_orders', orders); }
+function saveOrdersForChild(childId, y, m) {
+  var key = y + '-' + pad(m);
+  var partial = {};
+  partial[key] = {};
+  partial[key][childId] = (orders[key] && orders[key][childId]) ? orders[key][childId] : null;
+  apiMerge('hoiku_orders', partial, 2);
+}
+function apiMerge(key, data, depth) {
+  var url = API_URL + '?key=' + key + '&action=merge';
+  if (depth) url += '&depth=' + depth;
+  fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  }).catch(function(e) { console.error('Merge failed:', key, e); });
+}
 function saveHistory() { apiSave('hoiku_history', opHistory); }
 function saveConfirmed() { apiSave('hoiku_confirmed', hoikuConfirmed); }
 
@@ -123,7 +139,9 @@ function getOrderStatus(childId, y, m) {
 function setOrderConfirmed(childId, y, m, val) {
   var sKey = y+'-'+pad(m)+'_'+childId;
   if (val) hoikuConfirmed[sKey] = true; else delete hoikuConfirmed[sKey];
-  saveConfirmed();
+  var partial = {};
+  partial[sKey] = val ? true : null;
+  apiMerge('hoiku_confirmed', partial);
 }
 
 function getEditPassword() { return config.password || ''; }
@@ -308,7 +326,7 @@ function createCellClickHandler() {
     var idx = TYPE_CYCLE.indexOf(cur);
     var next = TYPE_CYCLE[(idx + 1) % TYPE_CYCLE.length];
     setOrder(cid, cy, cm, day, meal, next);
-    saveOrders();
+    saveOrdersForChild(cid, cy, cm);
     this.textContent = TYPE_LABELS[next];
     this.className = 'meal-cell' + (next ? ' '+next : '');
     var detail = day+'日 '+MEAL_NAMES[meal]+' '+(next ? typeLabel(next) : '取消');
@@ -369,7 +387,7 @@ function confirmOrder() {
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var was = getOrderStatus(childId, y, m);
-  saveOrders();
+  saveOrdersForChild(childId, y, m);
   setOrderConfirmed(childId, y, m, true);
   addHistory(staffId, childId, y+'-'+pad(m), was?'修正確定':'確定', getSummaryText(childId,y,m));
   orderLocked = true; orderDirty = false;
@@ -433,7 +451,7 @@ function bulkSetWeekdayAll() {
       for (var k=0; k<MEAL_KEYS.length; k++) setOrder(childId, y, m, d, MEAL_KEYS[k], 'normal');
     }
   }
-  saveOrders();
+  saveOrdersForChild(childId, y, m);
   addHistory(staffId, childId, y+'-'+pad(m), '一括操作', '平日全食セット（普通食）');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -458,7 +476,7 @@ function bulkCopyPrev() {
     if (!orders[key][childId]) orders[key][childId] = {};
     orders[key][childId][d] = {b:prev.b, s1:prev.s1, l:prev.l, s2:prev.s2, d:prev.d};
   }
-  saveOrders();
+  saveOrdersForChild(childId, y, m);
   addHistory(staffId, childId, y+'-'+pad(m), '前月コピー', py+'年'+pm+'月からコピー');
   orderDirty = true;
   renderOrderGridKeepUnlocked();
@@ -475,7 +493,7 @@ function bulkClear() {
   var m = parseInt(document.getElementById('order-month').value);
   var key = y+'-'+pad(m);
   if (orders[key] && orders[key][childId]) delete orders[key][childId];
-  saveOrders();
+  saveOrdersForChild(childId, y, m);
   setOrderConfirmed(childId, y, m, false);
   addHistory(staffId, childId, y+'-'+pad(m), 'クリア', '全注文を削除');
   orderDirty = false; orderLocked = false;
