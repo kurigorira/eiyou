@@ -824,15 +824,22 @@ function exportReportCSV() {
 // ==================== HISTORY TAB ====================
 function renderHistory() {
   populateHistoryFilters();
-  var monthF = document.getElementById('hist-month-filter').value;
+  var dateF = document.getElementById('hist-date-filter').value;
   var staffF = document.getElementById('hist-staff-filter').value;
   var actionF = document.getElementById('hist-action-filter').value;
   var tb = document.getElementById('history-list');
+  if (!dateF) {
+    tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999">日付を指定してください</td></tr>';
+    return;
+  }
   var html = '';
   var count = 0;
-  for (var i=0; i<opHistory.length && count<200; i++) {
+  for (var i=0; i<opHistory.length; i++) {
     var h = opHistory[i];
-    if (monthF && h.yearMonth !== monthF) continue;
+    var hDateRaw = h.timestamp ? h.timestamp.split(' ')[0] : '';
+    var hParts = hDateRaw.split('/');
+    var hDate = hParts.length === 3 ? hParts[0]+'-'+pad(parseInt(hParts[1]))+'-'+pad(parseInt(hParts[2])) : hDateRaw.replace(/\//g, '-');
+    if (dateF !== hDate) continue;
     if (staffF && h.staffId !== staffF) continue;
     if (actionF && h.action !== actionF) continue;
     html += '<tr>';
@@ -844,26 +851,17 @@ function renderHistory() {
     html += '</tr>';
     count++;
   }
-  if (!html) html = '<tr><td colspan="5" style="text-align:center;color:#999">履歴なし</td></tr>';
+  if (!html) html = '<tr><td colspan="5" style="text-align:center;color:#999">該当する履歴なし</td></tr>';
   tb.innerHTML = html;
 }
 
 function populateHistoryFilters() {
-  var monthSel = document.getElementById('hist-month-filter');
   var staffSel = document.getElementById('hist-staff-filter');
-  var curMonth = monthSel.value;
   var curStaff = staffSel.value;
-  var months = {};
   var staffIds = {};
   for (var i=0; i<opHistory.length; i++) {
-    months[opHistory[i].yearMonth] = true;
     staffIds[opHistory[i].staffId] = opHistory[i].staffName;
   }
-  monthSel.innerHTML = '<option value="">全期間</option>';
-  Object.keys(months).sort().reverse().forEach(function(ym) {
-    var o = document.createElement('option'); o.value=ym; o.textContent=ym; monthSel.appendChild(o);
-  });
-  monthSel.value = curMonth;
   staffSel.innerHTML = '<option value="">全職員</option>';
   Object.keys(staffIds).sort().forEach(function(id) {
     var o = document.createElement('option'); o.value=id; o.textContent=id+' '+staffIds[id]; staffSel.appendChild(o);
@@ -1163,7 +1161,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 
-    document.getElementById('hist-month-filter').addEventListener('change', renderHistory);
+    var histDateInput = document.getElementById('hist-date-filter');
+    histDateInput.value = fmtDate(new Date());
+    histDateInput.addEventListener('change', renderHistory);
     document.getElementById('hist-staff-filter').addEventListener('change', renderHistory);
     document.getElementById('hist-action-filter').addEventListener('change', renderHistory);
     document.getElementById('hist-clear').addEventListener('click', clearHistory);
