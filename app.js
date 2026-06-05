@@ -799,6 +799,87 @@ function runReport() {
   document.getElementById('rpt-result').innerHTML = html;
 }
 
+function runDetailReport() {
+  var y = parseInt(document.getElementById('rpt-year').value);
+  var m = parseInt(document.getElementById('rpt-month').value);
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var staffWithOrders = [];
+  for (var i=0; i<sorted.length; i++) {
+    var s = sorted[i];
+    var hasOrder = false;
+    var totals = {b:0,l:0,d:0,dd:0};
+    for (var d=1; d<=days; d++) {
+      var o = getOrder(s.id, y, m, d);
+      if (o.b) { totals.b++; hasOrder=true; }
+      if (o.l) { totals.l++; hasOrder=true; }
+      if (o.d) { totals.d++; hasOrder=true; }
+      if (o.dd) { totals.dd++; hasOrder=true; }
+    }
+    if (hasOrder) staffWithOrders.push({staff:s, totals:totals});
+  }
+  if (staffWithOrders.length === 0) {
+    document.getElementById('rpt-result').innerHTML = '<p style="text-align:center;color:#999;padding:20px">注文データがありません</p>';
+    return;
+  }
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</h3>';
+  html += '<div style="overflow-x:auto"><table class="rpt-table rpt-detail-table"><thead><tr>';
+  html += '<th rowspan="2">ID</th><th rowspan="2">氏名</th><th rowspan="2">部署</th>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    html += '<th colspan="4" style="border-bottom:none;';
+    if (dow===0) html += 'background:#fce4ec;';
+    else if (dow===6) html += 'background:#e8eaf6;';
+    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) html += 'background:#fff8e1;';
+    html += '">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dow]+'</span></th>';
+  }
+  html += '<th colspan="4" style="border-bottom:none;">合計</th>';
+  html += '</tr><tr>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    var bg = '';
+    if (dow===0) bg = 'background:#fce4ec;';
+    else if (dow===6) bg = 'background:#e8eaf6;';
+    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = 'background:#fff8e1;';
+    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">朝</th>';
+    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">昼</th>';
+    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">夕</th>';
+    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">医</th>';
+  }
+  html += '<th style="font-size:0.65rem;padding:2px;">朝</th>';
+  html += '<th style="font-size:0.65rem;padding:2px;">昼</th>';
+  html += '<th style="font-size:0.65rem;padding:2px;">夕</th>';
+  html += '<th style="font-size:0.65rem;padding:2px;">医</th>';
+  html += '</tr></thead><tbody>';
+  for (var i=0; i<staffWithOrders.length; i++) {
+    var sw = staffWithOrders[i];
+    var s = sw.staff;
+    html += '<tr>';
+    html += '<td style="text-align:left;white-space:nowrap">'+esc(s.id)+'</td>';
+    html += '<td style="text-align:left;white-space:nowrap">'+esc(s.name)+'</td>';
+    html += '<td style="text-align:left;white-space:nowrap">'+esc(s.dept)+'</td>';
+    for (var d=1; d<=days; d++) {
+      var o = getOrder(s.id, y, m, d);
+      var dow = dayOfWeek(y,m,d);
+      var bg = '';
+      if (dow===0) bg = 'background:#fce4ec;';
+      else if (dow===6) bg = 'background:#e8eaf6;';
+      else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = 'background:#fff8e1;';
+      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.b?'○':'')+'</td>';
+      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.l?'○':'')+'</td>';
+      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.d?'○':'')+'</td>';
+      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.dd?'○':'')+'</td>';
+    }
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.b+'</td>';
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.l+'</td>';
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.d+'</td>';
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.dd+'</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table></div></div>';
+  document.getElementById('rpt-result').innerHTML = html;
+}
+
 function exportReportCSV() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
@@ -1158,6 +1239,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('order-edit').addEventListener('click', editOrder);
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
+    document.getElementById('rpt-detail').addEventListener('click', runDetailReport);
     document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 

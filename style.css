@@ -396,6 +396,11 @@ input[type="text"], input[type="date"], select {
 
 .toast.show { opacity: 1; }
 
+.rpt-detail-table th, .rpt-detail-table td {
+  font-size: 0.7rem;
+  padding: 2px 3px;
+}
+
 @media print {
   header, .control-row, .btn, .tab-btn, #main-nav,
   .card, .order-controls, #order-summary, .date-selector,
@@ -404,7 +409,11 @@ input[type="text"], input[type="date"], select {
   .tab-content { display: none !important; }
   #tab-report { display: block !important; }
   .rpt-table, .rpt-section { page-break-inside: avoid; }
+  .rpt-detail-table { page-break-inside: auto; }
+  .rpt-detail-table tr { page-break-inside: avoid; }
   body { background: #fff; }
+
+  @page { size: landscape; margin: 5mm; }
 }
 
 @media (max-width: 600px) {
