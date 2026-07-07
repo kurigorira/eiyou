@@ -880,6 +880,116 @@ function runDetailReport() {
   document.getElementById('rpt-result').innerHTML = html;
 }
 
+function exportDetailExcel() {
+  var y = parseInt(document.getElementById('rpt-year').value);
+  var m = parseInt(document.getElementById('rpt-month').value);
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var staffWithOrders = [];
+  for (var i=0; i<sorted.length; i++) {
+    var s = sorted[i];
+    var hasOrder = false;
+    var totals = {b:0,l:0,d:0,dd:0};
+    var perDay = [];
+    for (var d=1; d<=days; d++) {
+      var o = getOrder(s.id, y, m, d);
+      perDay.push(o);
+      if (o.b) { totals.b++; hasOrder=true; }
+      if (o.l) { totals.l++; hasOrder=true; }
+      if (o.d) { totals.d++; hasOrder=true; }
+      if (o.dd) { totals.dd++; hasOrder=true; }
+    }
+    if (hasOrder) staffWithOrders.push({staff:s, totals:totals, perDay:perDay});
+  }
+  if (staffWithOrders.length === 0) {
+    showToast('注文データがありません');
+    return;
+  }
+  var sat = 'background:#e8eaf6;';
+  var sun = 'background:#fce4ec;';
+  var hol = 'background:#fff8e1;';
+  var th = 'border:1px solid #999;padding:2px 4px;text-align:center;font-weight:bold;background:#f0f0f0;';
+  var td = 'border:1px solid #999;padding:2px 4px;text-align:center;';
+  var tdL = 'border:1px solid #999;padding:2px 4px;text-align:left;';
+  var tdB = 'border:1px solid #999;padding:2px 4px;text-align:center;font-weight:bold;';
+  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+  html += '<head><meta charset="UTF-8">';
+  html += '<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>';
+  html += '<x:Name>'+y+'年'+m+'月注文一覧</x:Name>';
+  html += '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>';
+  html += '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>';
+  html += '</head><body>';
+  html += '<table border="1" style="border-collapse:collapse;font-size:10px">';
+  html += '<tr><td colspan="'+(3+days*4+4)+'" style="font-size:14px;font-weight:bold;padding:6px">'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</td></tr>';
+  html += '<tr>';
+  html += '<td rowspan="2" style="'+th+'">ID</td>';
+  html += '<td rowspan="2" style="'+th+'">氏名</td>';
+  html += '<td rowspan="2" style="'+th+'">部署</td>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    var bg = '';
+    if (dow===0) bg = sun;
+    else if (dow===6) bg = sat;
+    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
+    html += '<td colspan="4" style="'+th+bg+'">'+d+'日('+WEEKDAYS[dow]+')</td>';
+  }
+  html += '<td colspan="4" style="'+th+'">合計</td>';
+  html += '</tr>';
+  html += '<tr>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    var bg = '';
+    if (dow===0) bg = sun;
+    else if (dow===6) bg = sat;
+    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
+    html += '<td style="'+th+bg+'">朝</td>';
+    html += '<td style="'+th+bg+'">昼</td>';
+    html += '<td style="'+th+bg+'">夕</td>';
+    html += '<td style="'+th+bg+'">医</td>';
+  }
+  html += '<td style="'+th+'">朝</td>';
+  html += '<td style="'+th+'">昼</td>';
+  html += '<td style="'+th+'">夕</td>';
+  html += '<td style="'+th+'">医</td>';
+  html += '</tr>';
+  for (var i=0; i<staffWithOrders.length; i++) {
+    var sw = staffWithOrders[i];
+    var s = sw.staff;
+    html += '<tr>';
+    html += '<td style="'+tdL+'">'+esc(s.id)+'</td>';
+    html += '<td style="'+tdL+'">'+esc(s.name)+'</td>';
+    html += '<td style="'+tdL+'">'+esc(s.dept)+'</td>';
+    for (var d=1; d<=days; d++) {
+      var o = sw.perDay[d-1];
+      var dow = dayOfWeek(y,m,d);
+      var bg = '';
+      if (dow===0) bg = sun;
+      else if (dow===6) bg = sat;
+      else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
+      html += '<td style="'+td+bg+'">'+(o.b?'○':'')+'</td>';
+      html += '<td style="'+td+bg+'">'+(o.l?'○':'')+'</td>';
+      html += '<td style="'+td+bg+'">'+(o.d?'○':'')+'</td>';
+      html += '<td style="'+td+bg+'">'+(o.dd?'○':'')+'</td>';
+    }
+    html += '<td style="'+tdB+'">'+sw.totals.b+'</td>';
+    html += '<td style="'+tdB+'">'+sw.totals.l+'</td>';
+    html += '<td style="'+tdB+'">'+sw.totals.d+'</td>';
+    html += '<td style="'+tdB+'">'+sw.totals.dd+'</td>';
+    html += '</tr>';
+  }
+  html += '</table></body></html>';
+  var blob = new Blob(['﻿' + html], {type: 'application/vnd.ms-excel'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = '注文者一覧_'+y+'年'+pad(m)+'月.xls';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Excelファイルを出力しました');
+}
+
 function exportReportCSV() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
@@ -1240,6 +1350,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
     document.getElementById('rpt-detail').addEventListener('click', runDetailReport);
+    document.getElementById('rpt-detail-excel').addEventListener('click', exportDetailExcel);
     document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 
