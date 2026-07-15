@@ -158,7 +158,7 @@ function setOrderConfirmed(staffId, y, m, val) {
   apiMerge('confirmed', partial);
 }
 
-function emptyMeal() { return {b:false,l:false,d:false,dd:false}; }
+function emptyMeal() { return {b:false,l:false,d:false,dd:false,kb:false,kl:false,kd:false}; }
 function getOrder(staffId, y, m, d) {
   var key = y+'-'+pad(m);
   if (!orders[key] || !orders[key][staffId] || !orders[key][staffId][d]) return emptyMeal();
@@ -245,7 +245,7 @@ function renderTodayInner() {
   else if (dow===0||dow===6) { notice.textContent = ds+' は'+WEEKDAYS[dow]+'曜日です'; notice.style.display='block'; }
   else { notice.style.display='none'; }
 
-  var bList=[], lList=[], dList=[], ddList=[];
+  var bList=[], lList=[], dList=[], ddList=[], kbList=[], klList=[], kdList=[];
   var sorted = getStaffSorted();
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
@@ -254,11 +254,17 @@ function renderTodayInner() {
     if (o.l) lList.push(s);
     if (o.d) dList.push(s);
     if (o.dd) ddList.push(s);
+    if (o.kb) kbList.push(s);
+    if (o.kl) klList.push(s);
+    if (o.kd) kdList.push(s);
   }
   fillMealList('b-list', bList); document.getElementById('b-count').textContent = bList.length;
   fillMealList('l-list', lList); document.getElementById('l-count').textContent = lList.length;
   fillMealList('d-list', dList); document.getElementById('d-count').textContent = dList.length;
   fillMealList('dd-list', ddList); document.getElementById('dd-count').textContent = ddList.length;
+  fillMealList('kb-list', kbList); document.getElementById('kb-count').textContent = kbList.length;
+  fillMealList('kl-list', klList); document.getElementById('kl-count').textContent = klList.length;
+  fillMealList('kd-list', kdList); document.getElementById('kd-count').textContent = kdList.length;
 }
 function fillMealList(tbodyId, list) {
   var tb = document.getElementById(tbodyId);
@@ -478,8 +484,8 @@ function renderOrderGridInner() {
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
   var disabled = orderLocked ? ' disabled' : '';
-  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>備考</th></tr></thead><tbody>';
-  var totB=0, totL=0, totD=0, totDD=0;
+  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>備考</th></tr></thead><tbody>';
+  var totB=0, totL=0, totD=0, totDD=0, totKB=0, totKL=0, totKD=0;
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
     var ds = y+'-'+pad(m)+'-'+pad(d);
@@ -489,12 +495,16 @@ function renderOrderGridInner() {
     if (ds===todayStr) cls += ' day-today';
     var o = getOrder(staffId, y, m, d);
     if (o.b) totB++; if (o.l) totL++; if (o.d) totD++; if (o.dd) totDD++;
+    if (o.kb) totKB++; if (o.kl) totKL++; if (o.kd) totKD++;
     html += '<tr class="'+cls+'">';
     html += '<td>'+d+'</td><td>'+WEEKDAYS[dow]+'</td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="b"'+(o.b?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="l"'+(o.l?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="d"'+(o.d?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="dd"'+(o.dd?' checked':'')+disabled+'></td>';
+    html += '<td><input type="checkbox" data-d="'+d+'" data-m="kb"'+(o.kb?' checked':'')+disabled+'></td>';
+    html += '<td><input type="checkbox" data-d="'+d+'" data-m="kl"'+(o.kl?' checked':'')+disabled+'></td>';
+    html += '<td><input type="checkbox" data-d="'+d+'" data-m="kd"'+(o.kd?' checked':'')+disabled+'></td>';
     html += '<td style="text-align:left;font-size:0.8rem;color:#999">'+(hName||'')+'</td>';
     html += '</tr>';
   }
@@ -506,9 +516,12 @@ function renderOrderGridInner() {
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
   document.getElementById('os-dd').textContent = totDD;
+  document.getElementById('os-kb').textContent = totKB;
+  document.getElementById('os-kl').textContent = totKL;
+  document.getElementById('os-kd').textContent = totKD;
   updateOrderButtons();
 
-  var MEAL_NAMES = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'};
+  var MEAL_NAMES = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師',kb:'検査朝',kl:'検査昼',kd:'検査夕'};
   var checks = wrap.querySelectorAll('input[type="checkbox"]');
   for (var i=0; i<checks.length; i++) {
     checks[i].addEventListener('change', function() {
@@ -560,12 +573,13 @@ function updateOrderButtons() {
 
 function getOrderSummaryText(staffId, y, m) {
   var days = daysInMonth(y, m);
-  var t = {b:0,l:0,d:0,dd:0};
+  var t = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
   for (var d=1; d<=days; d++) {
     var o = getOrder(staffId, y, m, d);
     if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
+    if (o.kb) t.kb++; if (o.kl) t.kl++; if (o.kd) t.kd++;
   }
-  return '朝'+t.b+' 昼'+t.l+' 夕'+t.d+' 夕医'+t.dd;
+  return '朝'+t.b+' 昼'+t.l+' 夕'+t.d+' 夕医'+t.dd+' 検朝'+t.kb+' 検昼'+t.kl+' 検夕'+t.kd;
 }
 
 function confirmOrder() {
@@ -622,15 +636,19 @@ function setCheckboxDisabled(disabled) {
 
 function updateOrderSummary(y, m, staffId) {
   var days = daysInMonth(y, m);
-  var totB=0, totL=0, totD=0, totDD=0;
+  var totB=0, totL=0, totD=0, totDD=0, totKB=0, totKL=0, totKD=0;
   for (var d=1; d<=days; d++) {
     var o = getOrder(staffId, y, m, d);
     if (o.b) totB++; if (o.l) totL++; if (o.d) totD++; if (o.dd) totDD++;
+    if (o.kb) totKB++; if (o.kl) totKL++; if (o.kd) totKD++;
   }
   document.getElementById('os-b').textContent = totB;
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
   document.getElementById('os-dd').textContent = totDD;
+  document.getElementById('os-kb').textContent = totKB;
+  document.getElementById('os-kl').textContent = totKL;
+  document.getElementById('os-kd').textContent = totKD;
 }
 
 function requireUnlocked() {
@@ -648,7 +666,7 @@ function bulkSetWeekday(meal) {
   for (var d=1; d<=days; d++) {
     if (isWorkday(y, m, d)) setOrder(staffId, y, m, d, meal, true);
   }
-  var mealName = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'}[meal];
+  var mealName = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師',kb:'検査朝',kl:'検査昼',kd:'検査夕'}[meal];
   saveOrdersForStaff(staffId, y, m);
   addHistory(staffId, y+'-'+pad(m), '一括操作', '平日'+mealName+'セット');
   orderDirty = true;
@@ -669,11 +687,11 @@ function bulkCopyPrev() {
   var days = daysInMonth(y, m);
   for (var d=1; d<=days; d++) {
     var prev = getOrder(staffId, py, pm, d);
-    if (prev.b||prev.l||prev.d||prev.dd) {
+    if (prev.b||prev.l||prev.d||prev.dd||prev.kb||prev.kl||prev.kd) {
       var key = y+'-'+pad(m);
       if (!orders[key]) orders[key] = {};
       if (!orders[key][staffId]) orders[key][staffId] = {};
-      orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd};
+      orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd, kb:prev.kb, kl:prev.kl, kd:prev.kd};
     }
   }
   saveOrdersForStaff(staffId, y, m);
@@ -747,11 +765,11 @@ function runReport() {
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
   var sorted = getStaffSorted();
-  var totalB=0, totalL=0, totalD=0, totalDD=0;
+  var totalB=0, totalL=0, totalD=0, totalDD=0, totalKB=0, totalKL=0, totalKD=0;
   var deptData = {};
   var dailyData = [];
   for (var d=1; d<=days; d++) {
-    var dayB=0, dayL=0, dayD=0, dayDD=0;
+    var dayB=0, dayL=0, dayD=0, dayDD=0, dayKB=0, dayKL=0, dayKD=0;
     for (var i=0; i<sorted.length; i++) {
       var s = sorted[i];
       var o = getOrder(s.id, y, m, d);
@@ -759,41 +777,52 @@ function runReport() {
       if (o.l) { dayL++; totalL++; }
       if (o.d) { dayD++; totalD++; }
       if (o.dd) { dayDD++; totalDD++; }
-      if (!deptData[s.dept]) deptData[s.dept] = {b:0,l:0,d:0,dd:0};
+      if (o.kb) { dayKB++; totalKB++; }
+      if (o.kl) { dayKL++; totalKL++; }
+      if (o.kd) { dayKD++; totalKD++; }
+      if (!deptData[s.dept]) deptData[s.dept] = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
       if (o.b) deptData[s.dept].b++;
       if (o.l) deptData[s.dept].l++;
       if (o.d) deptData[s.dept].d++;
       if (o.dd) deptData[s.dept].dd++;
+      if (o.kb) deptData[s.dept].kb++;
+      if (o.kl) deptData[s.dept].kl++;
+      if (o.kd) deptData[s.dept].kd++;
     }
-    dailyData.push({day:d, dow:dayOfWeek(y,m,d), b:dayB, l:dayL, d:dayD, dd:dayDD});
+    dailyData.push({day:d, dow:dayOfWeek(y,m,d), b:dayB, l:dayL, d:dayD, dd:dayDD, kb:dayKB, kl:dayKL, kd:dayKD});
   }
-  var totalAll = totalB+totalL+totalD+totalDD;
+  var totalAll = totalB+totalL+totalD+totalDD+totalKB+totalKL+totalKD;
   var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 月次合計</h3>';
   html += '<table class="rpt-table"><thead><tr><th>食事</th><th>食数</th></tr></thead><tbody>';
   html += '<tr><td>朝食</td><td>'+totalB+'</td></tr>';
   html += '<tr><td>昼食</td><td>'+totalL+'</td></tr>';
   html += '<tr><td>夕食</td><td>'+totalD+'</td></tr>';
   html += '<tr><td>夕食医師</td><td>'+totalDD+'</td></tr>';
+  html += '<tr><td>検査食朝</td><td>'+totalKB+'</td></tr>';
+  html += '<tr><td>検査食昼</td><td>'+totalKL+'</td></tr>';
+  html += '<tr><td>検査食夕</td><td>'+totalKD+'</td></tr>';
   html += '</tbody><tfoot><tr><td>合計</td><td>'+totalAll+'</td></tr></tfoot></table></div>';
   html += '<div class="rpt-section"><h3>部署別集計</h3>';
-  html += '<table class="rpt-table"><thead><tr><th>部署</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>合計</th></tr></thead><tbody>';
+  html += '<table class="rpt-table"><thead><tr><th>部署</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>合計</th></tr></thead><tbody>';
   var deptKeys = Object.keys(deptData).sort();
-  var sumB=0,sumL=0,sumD=0,sumDD=0;
+  var sumB=0,sumL=0,sumD=0,sumDD=0,sumKB=0,sumKL=0,sumKD=0;
   for (var i=0; i<deptKeys.length; i++) {
     var dp = deptData[deptKeys[i]];
-    html += '<tr><td>'+esc(deptKeys[i])+'</td><td>'+dp.b+'</td><td>'+dp.l+'</td><td>'+dp.d+'</td><td>'+dp.dd+'</td><td>'+(dp.b+dp.l+dp.d+dp.dd)+'</td></tr>';
-    sumB+=dp.b; sumL+=dp.l; sumD+=dp.d; sumDD+=dp.dd;
+    var dpTot = dp.b+dp.l+dp.d+dp.dd+dp.kb+dp.kl+dp.kd;
+    html += '<tr><td>'+esc(deptKeys[i])+'</td><td>'+dp.b+'</td><td>'+dp.l+'</td><td>'+dp.d+'</td><td>'+dp.dd+'</td><td>'+dp.kb+'</td><td>'+dp.kl+'</td><td>'+dp.kd+'</td><td>'+dpTot+'</td></tr>';
+    sumB+=dp.b; sumL+=dp.l; sumD+=dp.d; sumDD+=dp.dd; sumKB+=dp.kb; sumKL+=dp.kl; sumKD+=dp.kd;
   }
-  html += '</tbody><tfoot><tr><td>合計</td><td>'+sumB+'</td><td>'+sumL+'</td><td>'+sumD+'</td><td>'+sumDD+'</td><td>'+(sumB+sumL+sumD+sumDD)+'</td></tr></tfoot></table></div>';
+  html += '</tbody><tfoot><tr><td>合計</td><td>'+sumB+'</td><td>'+sumL+'</td><td>'+sumD+'</td><td>'+sumDD+'</td><td>'+sumKB+'</td><td>'+sumKL+'</td><td>'+sumKD+'</td><td>'+(sumB+sumL+sumD+sumDD+sumKB+sumKL+sumKD)+'</td></tr></tfoot></table></div>';
   html += '<div class="rpt-section"><h3>日別内訳</h3>';
-  html += '<table class="rpt-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>合計</th></tr></thead><tbody>';
+  html += '<table class="rpt-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>合計</th></tr></thead><tbody>';
   for (var i=0; i<dailyData.length; i++) {
     var dy = dailyData[i];
     var ds = y+'-'+pad(m)+'-'+pad(dy.day);
     var hName = getHolidayName(ds);
     var label = WEEKDAYS[dy.dow];
     if (hName) label += '('+hName+')';
-    html += '<tr><td>'+dy.day+'</td><td style="text-align:center">'+label+'</td><td>'+dy.b+'</td><td>'+dy.l+'</td><td>'+dy.d+'</td><td>'+dy.dd+'</td><td>'+(dy.b+dy.l+dy.d+dy.dd)+'</td></tr>';
+    var dyTot = dy.b+dy.l+dy.d+dy.dd+dy.kb+dy.kl+dy.kd;
+    html += '<tr><td>'+dy.day+'</td><td style="text-align:center">'+label+'</td><td>'+dy.b+'</td><td>'+dy.l+'</td><td>'+dy.d+'</td><td>'+dy.dd+'</td><td>'+dy.kb+'</td><td>'+dy.kl+'</td><td>'+dy.kd+'</td><td>'+dyTot+'</td></tr>';
   }
   html += '</tbody></table></div>';
   document.getElementById('rpt-result').innerHTML = html;
@@ -808,13 +837,16 @@ function runDetailReport() {
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
     var hasOrder = false;
-    var totals = {b:0,l:0,d:0,dd:0};
+    var totals = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
     for (var d=1; d<=days; d++) {
       var o = getOrder(s.id, y, m, d);
       if (o.b) { totals.b++; hasOrder=true; }
       if (o.l) { totals.l++; hasOrder=true; }
       if (o.d) { totals.d++; hasOrder=true; }
       if (o.dd) { totals.dd++; hasOrder=true; }
+      if (o.kb) { totals.kb++; hasOrder=true; }
+      if (o.kl) { totals.kl++; hasOrder=true; }
+      if (o.kd) { totals.kd++; hasOrder=true; }
     }
     if (hasOrder) staffWithOrders.push({staff:s, totals:totals});
   }
@@ -827,13 +859,13 @@ function runDetailReport() {
   html += '<th rowspan="2">ID</th><th rowspan="2">氏名</th><th rowspan="2">部署</th>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
-    html += '<th colspan="4" style="border-bottom:none;';
+    html += '<th colspan="7" style="border-bottom:none;';
     if (dow===0) html += 'background:#fce4ec;';
     else if (dow===6) html += 'background:#e8eaf6;';
     else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) html += 'background:#fff8e1;';
     html += '">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dow]+'</span></th>';
   }
-  html += '<th colspan="4" style="border-bottom:none;">合計</th>';
+  html += '<th colspan="7" style="border-bottom:none;">合計</th>';
   html += '</tr><tr>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
@@ -845,11 +877,17 @@ function runDetailReport() {
     html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">昼</th>';
     html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">夕</th>';
     html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">医</th>';
+    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">検朝</th>';
+    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">検昼</th>';
+    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">検夕</th>';
   }
   html += '<th style="font-size:0.65rem;padding:2px;">朝</th>';
   html += '<th style="font-size:0.65rem;padding:2px;">昼</th>';
   html += '<th style="font-size:0.65rem;padding:2px;">夕</th>';
   html += '<th style="font-size:0.65rem;padding:2px;">医</th>';
+  html += '<th style="font-size:0.65rem;padding:2px;">検朝</th>';
+  html += '<th style="font-size:0.65rem;padding:2px;">検昼</th>';
+  html += '<th style="font-size:0.65rem;padding:2px;">検夕</th>';
   html += '</tr></thead><tbody>';
   for (var i=0; i<staffWithOrders.length; i++) {
     var sw = staffWithOrders[i];
@@ -869,11 +907,17 @@ function runDetailReport() {
       html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.l?'○':'')+'</td>';
       html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.d?'○':'')+'</td>';
       html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.dd?'○':'')+'</td>';
+      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.kb?'○':'')+'</td>';
+      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.kl?'○':'')+'</td>';
+      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.kd?'○':'')+'</td>';
     }
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.b+'</td>';
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.l+'</td>';
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.d+'</td>';
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.dd+'</td>';
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.kb+'</td>';
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.kl+'</td>';
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.kd+'</td>';
     html += '</tr>';
   }
   html += '</tbody></table></div></div>';
@@ -889,7 +933,7 @@ function exportDetailExcel() {
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
     var hasOrder = false;
-    var totals = {b:0,l:0,d:0,dd:0};
+    var totals = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
     var perDay = [];
     for (var d=1; d<=days; d++) {
       var o = getOrder(s.id, y, m, d);
@@ -898,6 +942,9 @@ function exportDetailExcel() {
       if (o.l) { totals.l++; hasOrder=true; }
       if (o.d) { totals.d++; hasOrder=true; }
       if (o.dd) { totals.dd++; hasOrder=true; }
+      if (o.kb) { totals.kb++; hasOrder=true; }
+      if (o.kl) { totals.kl++; hasOrder=true; }
+      if (o.kd) { totals.kd++; hasOrder=true; }
     }
     if (hasOrder) staffWithOrders.push({staff:s, totals:totals, perDay:perDay});
   }
@@ -920,7 +967,7 @@ function exportDetailExcel() {
   html += '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>';
   html += '</head><body>';
   html += '<table border="1" style="border-collapse:collapse;font-size:10px">';
-  html += '<tr><td colspan="'+(3+days*4+4)+'" style="font-size:14px;font-weight:bold;padding:6px">'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</td></tr>';
+  html += '<tr><td colspan="'+(3+days*7+7)+'" style="font-size:14px;font-weight:bold;padding:6px">'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</td></tr>';
   html += '<tr>';
   html += '<td rowspan="2" style="'+th+'">ID</td>';
   html += '<td rowspan="2" style="'+th+'">氏名</td>';
@@ -931,9 +978,9 @@ function exportDetailExcel() {
     if (dow===0) bg = sun;
     else if (dow===6) bg = sat;
     else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
-    html += '<td colspan="4" style="'+th+bg+'">'+d+'日('+WEEKDAYS[dow]+')</td>';
+    html += '<td colspan="7" style="'+th+bg+'">'+d+'日('+WEEKDAYS[dow]+')</td>';
   }
-  html += '<td colspan="4" style="'+th+'">合計</td>';
+  html += '<td colspan="7" style="'+th+'">合計</td>';
   html += '</tr>';
   html += '<tr>';
   for (var d=1; d<=days; d++) {
@@ -946,11 +993,17 @@ function exportDetailExcel() {
     html += '<td style="'+th+bg+'">昼</td>';
     html += '<td style="'+th+bg+'">夕</td>';
     html += '<td style="'+th+bg+'">医</td>';
+    html += '<td style="'+th+bg+'">検朝</td>';
+    html += '<td style="'+th+bg+'">検昼</td>';
+    html += '<td style="'+th+bg+'">検夕</td>';
   }
   html += '<td style="'+th+'">朝</td>';
   html += '<td style="'+th+'">昼</td>';
   html += '<td style="'+th+'">夕</td>';
   html += '<td style="'+th+'">医</td>';
+  html += '<td style="'+th+'">検朝</td>';
+  html += '<td style="'+th+'">検昼</td>';
+  html += '<td style="'+th+'">検夕</td>';
   html += '</tr>';
   for (var i=0; i<staffWithOrders.length; i++) {
     var sw = staffWithOrders[i];
@@ -970,11 +1023,17 @@ function exportDetailExcel() {
       html += '<td style="'+td+bg+'">'+(o.l?'○':'')+'</td>';
       html += '<td style="'+td+bg+'">'+(o.d?'○':'')+'</td>';
       html += '<td style="'+td+bg+'">'+(o.dd?'○':'')+'</td>';
+      html += '<td style="'+td+bg+'">'+(o.kb?'○':'')+'</td>';
+      html += '<td style="'+td+bg+'">'+(o.kl?'○':'')+'</td>';
+      html += '<td style="'+td+bg+'">'+(o.kd?'○':'')+'</td>';
     }
     html += '<td style="'+tdB+'">'+sw.totals.b+'</td>';
     html += '<td style="'+tdB+'">'+sw.totals.l+'</td>';
     html += '<td style="'+tdB+'">'+sw.totals.d+'</td>';
     html += '<td style="'+tdB+'">'+sw.totals.dd+'</td>';
+    html += '<td style="'+tdB+'">'+sw.totals.kb+'</td>';
+    html += '<td style="'+tdB+'">'+sw.totals.kl+'</td>';
+    html += '<td style="'+tdB+'">'+sw.totals.kd+'</td>';
     html += '</tr>';
   }
   html += '</table></body></html>';
@@ -995,18 +1054,19 @@ function exportReportCSV() {
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
   var sorted = getStaffSorted();
-  var csv = '﻿職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,合計\n';
+  var csv = '﻿職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,検査朝,検査昼,検査夕,合計\n';
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
-    var t = {b:0,l:0,d:0,dd:0};
+    var t = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
     for (var d=1; d<=days; d++) {
       var o = getOrder(s.id, y, m, d);
       if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
+      if (o.kb) t.kb++; if (o.kl) t.kl++; if (o.kd) t.kd++;
     }
-    var total = t.b + t.l + t.d + t.dd;
+    var total = t.b + t.l + t.d + t.dd + t.kb + t.kl + t.kd;
     if (total === 0) continue;
     csv += '"'+s.id.replace(/"/g,'""')+'","'+s.name.replace(/"/g,'""')+'","'+s.dept.replace(/"/g,'""')+'",';
-    csv += t.b+','+t.l+','+t.d+','+t.dd+','+total+'\n';
+    csv += t.b+','+t.l+','+t.d+','+t.dd+','+t.kb+','+t.kl+','+t.kd+','+total+'\n';
   }
   downloadFile(csv, '月間注文集計_'+y+'年'+pad(m)+'月.csv', 'text/csv;charset=utf-8');
   showToast('CSVを出力しました');
@@ -1343,6 +1403,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('bulk-weekday-l').addEventListener('click', function(){bulkSetWeekday('l');});
     document.getElementById('bulk-weekday-d').addEventListener('click', function(){bulkSetWeekday('d');});
     document.getElementById('bulk-weekday-dd').addEventListener('click', function(){bulkSetWeekday('dd');});
+    document.getElementById('bulk-weekday-kb').addEventListener('click', function(){bulkSetWeekday('kb');});
+    document.getElementById('bulk-weekday-kl').addEventListener('click', function(){bulkSetWeekday('kl');});
+    document.getElementById('bulk-weekday-kd').addEventListener('click', function(){bulkSetWeekday('kd');});
     document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
     document.getElementById('bulk-clear').addEventListener('click', bulkClear);
     document.getElementById('order-confirm').addEventListener('click', confirmOrder);

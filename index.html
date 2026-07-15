@@ -57,6 +57,21 @@
           <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
           <tbody id="dd-list"></tbody></table>
         </div>
+        <div class="meal-card">
+          <h3>検査食朝 <span id="kb-count" class="badge">0</span></h3>
+          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
+          <tbody id="kb-list"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>検査食昼 <span id="kl-count" class="badge">0</span></h3>
+          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
+          <tbody id="kl-list"></tbody></table>
+        </div>
+        <div class="meal-card">
+          <h3>検査食夕 <span id="kd-count" class="badge">0</span></h3>
+          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
+          <tbody id="kd-list"></tbody></table>
+        </div>
       </div>
     </section>
 
@@ -84,6 +99,11 @@
           <button class="btn btn-outline" id="bulk-weekday-d">平日夕食</button>
           <button class="btn btn-outline" id="bulk-weekday-dd">平日夕医師</button>
           <button class="btn btn-outline" id="bulk-copy-prev">前月コピー</button>
+        </div>
+        <div class="control-row">
+          <button class="btn btn-outline" id="bulk-weekday-kb">平日検査朝</button>
+          <button class="btn btn-outline" id="bulk-weekday-kl">平日検査昼</button>
+          <button class="btn btn-outline" id="bulk-weekday-kd">平日検査夕</button>
           <button class="btn btn-danger-outline" id="bulk-clear">全クリア</button>
         </div>
       </div>
@@ -92,7 +112,7 @@
       </div>
       <div id="order-summary" style="display:none">
         <strong>合計:</strong>
-        朝食 <span id="os-b">0</span>食 / 昼食 <span id="os-l">0</span>食 / 夕食 <span id="os-d">0</span>食 / 夕食医師 <span id="os-dd">0</span>食
+        朝食 <span id="os-b">0</span> / 昼食 <span id="os-l">0</span> / 夕食 <span id="os-d">0</span> / 夕食医師 <span id="os-dd">0</span> / 検査朝 <span id="os-kb">0</span> / 検査昼 <span id="os-kl">0</span> / 検査夕 <span id="os-kd">0</span>
       </div>
       <div id="order-actions" style="display:none" class="order-actions">
         <span id="order-status" class="order-status"></span>
