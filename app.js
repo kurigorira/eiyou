@@ -917,7 +917,11 @@ function exportKensaCSV() {
 
 // ==================== MEAL COUNT SHEETS (総務課/栄養科) ====================
 function isDoctorDept(dept) {
-  return !!dept && dept.indexOf('医局') !== -1;
+  return !!dept && (dept.indexOf('医局') !== -1 || dept.indexOf('診療') !== -1);
+}
+
+function isKensaDept(dept) {
+  return !!dept && dept.indexOf('診療') !== -1;
 }
 
 function buildMealCountData(y, m) {
@@ -1098,9 +1102,13 @@ function renderKensaGrid() {
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
   var sorted = getStaffSorted();
+  var doctors = sorted.filter(function(s) { return isKensaDept(s.dept); });
+  if (doctors.length === 0) doctors = sorted;
+  var doctorIds = {};
   var opts = '<option value="">-- 未割当 --</option>';
-  for (var i=0; i<sorted.length; i++) {
-    opts += '<option value="'+esc(sorted[i].id)+'">'+esc(sorted[i].id+' '+sorted[i].name)+'</option>';
+  for (var i=0; i<doctors.length; i++) {
+    doctorIds[doctors[i].id] = true;
+    opts += '<option value="'+esc(doctors[i].id)+'">'+esc(doctors[i].id+' '+doctors[i].name)+'</option>';
   }
   var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>備考</th></tr></thead><tbody>';
   for (var d=1; d<=days; d++) {
@@ -1124,7 +1132,15 @@ function renderKensaGrid() {
   for (var i=0; i<sels.length; i++) {
     var day = parseInt(sels[i].getAttribute('data-d'));
     var meal = sels[i].getAttribute('data-m');
-    sels[i].value = getKensaAssign(y, m, day, meal);
+    var assigned = getKensaAssign(y, m, day, meal);
+    if (assigned && !doctorIds[assigned]) {
+      var as = getStaffById(assigned);
+      var extra = document.createElement('option');
+      extra.value = assigned;
+      extra.textContent = assigned + ' ' + (as ? as.name : '');
+      sels[i].appendChild(extra);
+    }
+    sels[i].value = assigned;
     sels[i].addEventListener('change', function() {
       var dd = parseInt(this.getAttribute('data-d'));
       var mm = this.getAttribute('data-m');
