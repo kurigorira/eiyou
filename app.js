@@ -915,6 +915,160 @@ function exportKensaCSV() {
   showToast('検査食統計CSVを出力しました');
 }
 
+// ==================== MEAL COUNT SHEETS (総務課/栄養科) ====================
+function isDoctorDept(dept) {
+  return !!dept && dept.indexOf('医局') !== -1;
+}
+
+function buildMealCountData(y, m) {
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var list = [];
+  for (var d=1; d<=days; d++) {
+    var row = {day:d, bDoc:0, bGen:0, lDoc:0, lGen:0, dDoc:0, dGen:0};
+    for (var i=0; i<sorted.length; i++) {
+      var s = sorted[i];
+      var o = getOrder(s.id, y, m, d);
+      var doc = isDoctorDept(s.dept);
+      if (o.b) { if (doc) row.bDoc++; else row.bGen++; }
+      if (o.l) { if (doc) row.lDoc++; else row.lGen++; }
+      if (o.d) row.dGen++;
+      if (o.dd) row.dDoc++;
+    }
+    list.push(row);
+  }
+  return list;
+}
+
+function fetchOrdersThen(fn) {
+  fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
+    orders = serverOrders || {};
+    fn();
+  }).catch(function() {
+    fn();
+  });
+}
+
+function xlsWrap(sheetName, bodyHtml) {
+  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+  html += '<head><meta charset="UTF-8">';
+  html += '<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>';
+  html += '<x:Name>'+sheetName+'</x:Name>';
+  html += '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>';
+  html += '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>';
+  html += '</head><body>' + bodyHtml + '</body></html>';
+  return html;
+}
+
+function downloadXls(html, filename) {
+  var blob = new Blob(['﻿' + html], {type: 'application/vnd.ms-excel'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportSoumuExcel() {
+  fetchOrdersThen(function() {
+    var y = parseInt(document.getElementById('rpt-year').value);
+    var m = parseInt(document.getElementById('rpt-month').value);
+    var data = buildMealCountData(y, m);
+    var days = data.length;
+    var th = 'border:1px solid #000;padding:3px 6px;text-align:center;font-weight:bold;background:#f0f0f0;';
+    var td = 'border:1px solid #000;padding:3px 6px;text-align:center;';
+    var tdL = 'border:1px solid #000;padding:3px 6px;text-align:center;font-weight:bold;';
+    var html = '<table border="1" style="border-collapse:collapse;font-size:11px">';
+    html += '<tr><td colspan="'+(2+days+1)+'" style="font-size:16px;font-weight:bold;text-align:center;padding:8px">職員食実施食数表</td></tr>';
+    html += '<tr><td colspan="'+(2+days+1)+'" style="padding:4px;font-weight:bold">'+y+'年'+m+'月</td></tr>';
+    html += '<tr><td style="'+th+'"></td><td style="'+th+'"></td>';
+    for (var d=1; d<=days; d++) html += '<td style="'+th+'">'+d+'</td>';
+    html += '<td style="'+th+'">合計</td></tr>';
+
+    function sumRow(key) {
+      var t = 0;
+      for (var i=0; i<data.length; i++) t += data[i][key];
+      return t;
+    }
+    function rowHtml(label, rowspan, subLabel, key1, key2) {
+      var h = '<tr>';
+      if (label !== null) h += '<td rowspan="'+rowspan+'" style="'+tdL+'">'+label+'</td>';
+      h += '<td style="'+td+'">'+subLabel+'</td>';
+      var total = 0;
+      for (var i=0; i<data.length; i++) {
+        var v = key2 ? data[i][key1]+data[i][key2] : data[i][key1];
+        total += v;
+        h += '<td style="'+td+'">'+v+'</td>';
+      }
+      h += '<td style="'+tdL+'">'+total+'</td></tr>';
+      return h;
+    }
+    html += rowHtml('朝', 3, '医局', 'bDoc');
+    html += rowHtml(null, 0, '一般', 'bGen');
+    html += rowHtml(null, 0, '合計', 'bDoc', 'bGen');
+    html += rowHtml('昼', 3, '医局', 'lDoc');
+    html += rowHtml(null, 0, '一般', 'lGen');
+    html += rowHtml(null, 0, '合計', 'lDoc', 'lGen');
+    html += rowHtml('夕', 3, '医局', 'dDoc');
+    html += rowHtml(null, 0, '一般', 'dGen');
+    html += rowHtml(null, 0, '合計', 'dDoc', 'dGen');
+    html += '</table>';
+    downloadXls(xlsWrap('総務課提出用', html), '職員食実施食数表(総務課提出用)_'+y+'年'+pad(m)+'月.xls');
+    showToast('総務課提出用Excelを出力しました');
+  });
+}
+
+function exportEiyouExcel() {
+  fetchOrdersThen(function() {
+    var y = parseInt(document.getElementById('rpt-year').value);
+    var m = parseInt(document.getElementById('rpt-month').value);
+    var data = buildMealCountData(y, m);
+    var days = data.length;
+    var th = 'border:1px solid #000;padding:3px 8px;text-align:center;font-weight:bold;background:#f0f0f0;';
+    var td = 'border:1px solid #000;padding:3px 8px;text-align:center;';
+    var gap = 'border:none;padding:0 6px;';
+    var html = '<table style="border-collapse:collapse;font-size:11px">';
+    html += '<tr><td colspan="11" style="font-size:16px;font-weight:bold;text-align:center;padding:8px;border:none">'+y+'年　'+m+'月　　職員食食数表</td></tr>';
+    html += '<tr>';
+    html += '<td style="'+th+'">日</td><td style="'+th+'">朝</td><td style="'+th+'">昼</td><td style="'+th+'">夕</td><td style="'+th+'">医局</td>';
+    html += '<td style="'+gap+'"></td>';
+    html += '<td style="'+th+'">日</td><td style="'+th+'">朝</td><td style="'+th+'">昼</td><td style="'+th+'">夕</td><td style="'+th+'">医局</td>';
+    html += '</tr>';
+    var rows = Math.max(15, days - 15);
+    for (var i=0; i<rows; i++) {
+      var left = (i < 15) ? data[i] : null;
+      var right = (15+i < days) ? data[15+i] : null;
+      html += '<tr>';
+      if (left) {
+        html += '<td style="'+td+'">'+left.day+'</td>';
+        html += '<td style="'+td+'">'+(left.bDoc+left.bGen)+'</td>';
+        html += '<td style="'+td+'">'+(left.lDoc+left.lGen+1)+'</td>';
+        html += '<td style="'+td+'">'+(left.dDoc+left.dGen)+'</td>';
+        html += '<td style="'+td+'">'+left.dDoc+'</td>';
+      } else {
+        html += '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td>';
+      }
+      html += '<td style="'+gap+'"></td>';
+      if (right) {
+        html += '<td style="'+td+'">'+right.day+'</td>';
+        html += '<td style="'+td+'">'+(right.bDoc+right.bGen)+'</td>';
+        html += '<td style="'+td+'">'+(right.lDoc+right.lGen+1)+'</td>';
+        html += '<td style="'+td+'">'+(right.dDoc+right.dGen)+'</td>';
+        html += '<td style="'+td+'">'+right.dDoc+'</td>';
+      } else {
+        html += '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td>';
+      }
+      html += '</tr>';
+    }
+    html += '</table>';
+    downloadXls(xlsWrap('栄養科掲示用', html), '職員食食数表(栄養科掲示用)_'+y+'年'+pad(m)+'月.xls');
+    showToast('栄養科掲示用Excelを出力しました');
+  });
+}
+
 // ==================== KENSA TAB ====================
 function initKensaTab() {
   var ySel = document.getElementById('kensa-year');
@@ -1564,6 +1718,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('rpt-detail').addEventListener('click', runDetailReport);
     document.getElementById('rpt-detail-excel').addEventListener('click', exportDetailExcel);
     document.getElementById('rpt-kensa-csv').addEventListener('click', exportKensaCSV);
+    document.getElementById('rpt-soumu-excel').addEventListener('click', exportSoumuExcel);
+    document.getElementById('rpt-eiyou-excel').addEventListener('click', exportEiyouExcel);
     document.getElementById('kensa-year').addEventListener('change', renderKensaGrid);
     document.getElementById('kensa-month').addEventListener('change', renderKensaGrid);
     document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
