@@ -401,6 +401,11 @@ input[type="text"], input[type="date"], select {
   padding: 2px 3px;
 }
 
+.kensa-sel {
+  max-width: 170px;
+  font-size: 0.82rem;
+}
+
 @media print {
   header, .control-row, .btn, .tab-btn, #main-nav,
   .card, .order-controls, #order-summary, .date-selector,

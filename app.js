@@ -38,6 +38,7 @@ var opHistory = [];
 var children = [];
 var config = {};
 var confirmed = {};
+var kensa = {};
 var toastTimer = null;
 var adminMode = false;
 
@@ -58,6 +59,7 @@ function loadData() {
     children = d.children || [];
     config = d.config || {};
     confirmed = d.confirmed || {};
+    kensa = d.kensa || {};
   });
 }
 
@@ -84,6 +86,7 @@ function saveHistory() { apiSave('history', opHistory); }
 function saveChildren() { apiSave('children', children); }
 function saveConfig() { apiSave('config', config); }
 function saveConfirmed() { apiSave('confirmed', confirmed); }
+function saveKensa() { apiSave('kensa', kensa); }
 
 function getChildrenByStaff(staffId) {
   return children.filter(function(c) { return c.staffId === staffId; });
@@ -158,7 +161,7 @@ function setOrderConfirmed(staffId, y, m, val) {
   apiMerge('confirmed', partial);
 }
 
-function emptyMeal() { return {b:false,l:false,d:false,dd:false,kb:false,kl:false,kd:false}; }
+function emptyMeal() { return {b:false,l:false,d:false,dd:false}; }
 function getOrder(staffId, y, m, d) {
   var key = y+'-'+pad(m);
   if (!orders[key] || !orders[key][staffId] || !orders[key][staffId][d]) return emptyMeal();
@@ -221,12 +224,17 @@ function showTab(name) {
   if (name==='report') initReportTab();
   if (name==='history') renderHistory();
   if (name==='holiday') renderHolidayList();
+  if (name==='kensa') initKensaTab();
 }
 
 // ==================== TODAY TAB ====================
 function renderToday() {
   fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
     orders = serverOrders || {};
+    return fetch(API_URL + '?key=kensa').then(function(r) { return r.json(); }).then(function(serverKensa) {
+      kensa = serverKensa || {};
+    });
+  }).then(function() {
     renderTodayInner();
   }).catch(function() {
     renderTodayInner();
@@ -245,7 +253,7 @@ function renderTodayInner() {
   else if (dow===0||dow===6) { notice.textContent = ds+' は'+WEEKDAYS[dow]+'曜日です'; notice.style.display='block'; }
   else { notice.style.display='none'; }
 
-  var bList=[], lList=[], dList=[], ddList=[], kbList=[], klList=[], kdList=[];
+  var bList=[], lList=[], dList=[], ddList=[];
   var sorted = getStaffSorted();
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
@@ -254,17 +262,36 @@ function renderTodayInner() {
     if (o.l) lList.push(s);
     if (o.d) dList.push(s);
     if (o.dd) ddList.push(s);
-    if (o.kb) kbList.push(s);
-    if (o.kl) klList.push(s);
-    if (o.kd) kdList.push(s);
   }
   fillMealList('b-list', bList); document.getElementById('b-count').textContent = bList.length;
   fillMealList('l-list', lList); document.getElementById('l-count').textContent = lList.length;
   fillMealList('d-list', dList); document.getElementById('d-count').textContent = dList.length;
   fillMealList('dd-list', ddList); document.getElementById('dd-count').textContent = ddList.length;
-  fillMealList('kb-list', kbList); document.getElementById('kb-count').textContent = kbList.length;
-  fillMealList('kl-list', klList); document.getElementById('kl-count').textContent = klList.length;
-  fillMealList('kd-list', kdList); document.getElementById('kd-count').textContent = kdList.length;
+  renderKensaToday(y, m, d);
+}
+
+function getKensaAssign(y, m, d, meal) {
+  var ym = y+'-'+pad(m);
+  if (!kensa[ym] || !kensa[ym][d]) return '';
+  return kensa[ym][d][meal] || '';
+}
+
+function renderKensaToday(y, m, d) {
+  var meals = ['b','l','d'];
+  var ids = {b:'kensa-today-b', l:'kensa-today-l', d:'kensa-today-d'};
+  for (var i=0; i<meals.length; i++) {
+    var el = document.getElementById(ids[meals[i]]);
+    if (!el) continue;
+    var sid = getKensaAssign(y, m, d, meals[i]);
+    var s = sid ? getStaffById(sid) : null;
+    if (s) {
+      el.textContent = s.id + ' ' + s.name + '（' + s.dept + '）';
+      el.style.color = '';
+    } else {
+      el.textContent = '未割当';
+      el.style.color = '#999';
+    }
+  }
 }
 function fillMealList(tbodyId, list) {
   var tb = document.getElementById(tbodyId);
@@ -484,8 +511,8 @@ function renderOrderGridInner() {
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
   var disabled = orderLocked ? ' disabled' : '';
-  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>備考</th></tr></thead><tbody>';
-  var totB=0, totL=0, totD=0, totDD=0, totKB=0, totKL=0, totKD=0;
+  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>備考</th></tr></thead><tbody>';
+  var totB=0, totL=0, totD=0, totDD=0;
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
     var ds = y+'-'+pad(m)+'-'+pad(d);
@@ -495,16 +522,12 @@ function renderOrderGridInner() {
     if (ds===todayStr) cls += ' day-today';
     var o = getOrder(staffId, y, m, d);
     if (o.b) totB++; if (o.l) totL++; if (o.d) totD++; if (o.dd) totDD++;
-    if (o.kb) totKB++; if (o.kl) totKL++; if (o.kd) totKD++;
     html += '<tr class="'+cls+'">';
     html += '<td>'+d+'</td><td>'+WEEKDAYS[dow]+'</td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="b"'+(o.b?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="l"'+(o.l?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="d"'+(o.d?' checked':'')+disabled+'></td>';
     html += '<td><input type="checkbox" data-d="'+d+'" data-m="dd"'+(o.dd?' checked':'')+disabled+'></td>';
-    html += '<td><input type="checkbox" data-d="'+d+'" data-m="kb"'+(o.kb?' checked':'')+disabled+'></td>';
-    html += '<td><input type="checkbox" data-d="'+d+'" data-m="kl"'+(o.kl?' checked':'')+disabled+'></td>';
-    html += '<td><input type="checkbox" data-d="'+d+'" data-m="kd"'+(o.kd?' checked':'')+disabled+'></td>';
     html += '<td style="text-align:left;font-size:0.8rem;color:#999">'+(hName||'')+'</td>';
     html += '</tr>';
   }
@@ -516,12 +539,9 @@ function renderOrderGridInner() {
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
   document.getElementById('os-dd').textContent = totDD;
-  document.getElementById('os-kb').textContent = totKB;
-  document.getElementById('os-kl').textContent = totKL;
-  document.getElementById('os-kd').textContent = totKD;
   updateOrderButtons();
 
-  var MEAL_NAMES = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師',kb:'検査朝',kl:'検査昼',kd:'検査夕'};
+  var MEAL_NAMES = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'};
   var checks = wrap.querySelectorAll('input[type="checkbox"]');
   for (var i=0; i<checks.length; i++) {
     checks[i].addEventListener('change', function() {
@@ -573,13 +593,12 @@ function updateOrderButtons() {
 
 function getOrderSummaryText(staffId, y, m) {
   var days = daysInMonth(y, m);
-  var t = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
+  var t = {b:0,l:0,d:0,dd:0};
   for (var d=1; d<=days; d++) {
     var o = getOrder(staffId, y, m, d);
     if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
-    if (o.kb) t.kb++; if (o.kl) t.kl++; if (o.kd) t.kd++;
   }
-  return '朝'+t.b+' 昼'+t.l+' 夕'+t.d+' 夕医'+t.dd+' 検朝'+t.kb+' 検昼'+t.kl+' 検夕'+t.kd;
+  return '朝'+t.b+' 昼'+t.l+' 夕'+t.d+' 夕医'+t.dd;
 }
 
 function confirmOrder() {
@@ -636,19 +655,15 @@ function setCheckboxDisabled(disabled) {
 
 function updateOrderSummary(y, m, staffId) {
   var days = daysInMonth(y, m);
-  var totB=0, totL=0, totD=0, totDD=0, totKB=0, totKL=0, totKD=0;
+  var totB=0, totL=0, totD=0, totDD=0;
   for (var d=1; d<=days; d++) {
     var o = getOrder(staffId, y, m, d);
     if (o.b) totB++; if (o.l) totL++; if (o.d) totD++; if (o.dd) totDD++;
-    if (o.kb) totKB++; if (o.kl) totKL++; if (o.kd) totKD++;
   }
   document.getElementById('os-b').textContent = totB;
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
   document.getElementById('os-dd').textContent = totDD;
-  document.getElementById('os-kb').textContent = totKB;
-  document.getElementById('os-kl').textContent = totKL;
-  document.getElementById('os-kd').textContent = totKD;
 }
 
 function requireUnlocked() {
@@ -666,7 +681,7 @@ function bulkSetWeekday(meal) {
   for (var d=1; d<=days; d++) {
     if (isWorkday(y, m, d)) setOrder(staffId, y, m, d, meal, true);
   }
-  var mealName = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師',kb:'検査朝',kl:'検査昼',kd:'検査夕'}[meal];
+  var mealName = {b:'朝食',l:'昼食',d:'夕食',dd:'夕食医師'}[meal];
   saveOrdersForStaff(staffId, y, m);
   addHistory(staffId, y+'-'+pad(m), '一括操作', '平日'+mealName+'セット');
   orderDirty = true;
@@ -687,11 +702,11 @@ function bulkCopyPrev() {
   var days = daysInMonth(y, m);
   for (var d=1; d<=days; d++) {
     var prev = getOrder(staffId, py, pm, d);
-    if (prev.b||prev.l||prev.d||prev.dd||prev.kb||prev.kl||prev.kd) {
+    if (prev.b||prev.l||prev.d||prev.dd) {
       var key = y+'-'+pad(m);
       if (!orders[key]) orders[key] = {};
       if (!orders[key][staffId]) orders[key][staffId] = {};
-      orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd, kb:prev.kb, kl:prev.kl, kd:prev.kd};
+      orders[key][staffId][d] = {b:prev.b, l:prev.l, d:prev.d, dd:prev.dd};
     }
   }
   saveOrdersForStaff(staffId, y, m);
@@ -761,6 +776,19 @@ function initReportTab() {
 }
 
 function runReport() {
+  fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
+    orders = serverOrders || {};
+    return fetch(API_URL + '?key=kensa').then(function(r) { return r.json(); }).then(function(serverKensa) {
+      kensa = serverKensa || {};
+    });
+  }).then(function() {
+    runReportInner();
+  }).catch(function() {
+    runReportInner();
+  });
+}
+
+function runReportInner() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
@@ -769,7 +797,7 @@ function runReport() {
   var deptData = {};
   var dailyData = [];
   for (var d=1; d<=days; d++) {
-    var dayB=0, dayL=0, dayD=0, dayDD=0, dayKB=0, dayKL=0, dayKD=0;
+    var dayB=0, dayL=0, dayD=0, dayDD=0;
     for (var i=0; i<sorted.length; i++) {
       var s = sorted[i];
       var o = getOrder(s.id, y, m, d);
@@ -777,18 +805,16 @@ function runReport() {
       if (o.l) { dayL++; totalL++; }
       if (o.d) { dayD++; totalD++; }
       if (o.dd) { dayDD++; totalDD++; }
-      if (o.kb) { dayKB++; totalKB++; }
-      if (o.kl) { dayKL++; totalKL++; }
-      if (o.kd) { dayKD++; totalKD++; }
-      if (!deptData[s.dept]) deptData[s.dept] = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
+      if (!deptData[s.dept]) deptData[s.dept] = {b:0,l:0,d:0,dd:0};
       if (o.b) deptData[s.dept].b++;
       if (o.l) deptData[s.dept].l++;
       if (o.d) deptData[s.dept].d++;
       if (o.dd) deptData[s.dept].dd++;
-      if (o.kb) deptData[s.dept].kb++;
-      if (o.kl) deptData[s.dept].kl++;
-      if (o.kd) deptData[s.dept].kd++;
     }
+    var dayKB = getKensaAssign(y, m, d, 'b') ? 1 : 0;
+    var dayKL = getKensaAssign(y, m, d, 'l') ? 1 : 0;
+    var dayKD = getKensaAssign(y, m, d, 'd') ? 1 : 0;
+    totalKB += dayKB; totalKL += dayKL; totalKD += dayKD;
     dailyData.push({day:d, dow:dayOfWeek(y,m,d), b:dayB, l:dayL, d:dayD, dd:dayDD, kb:dayKB, kl:dayKL, kd:dayKD});
   }
   var totalAll = totalB+totalL+totalD+totalDD+totalKB+totalKL+totalKD;
@@ -803,16 +829,18 @@ function runReport() {
   html += '<tr><td>検査食夕</td><td>'+totalKD+'</td></tr>';
   html += '</tbody><tfoot><tr><td>合計</td><td>'+totalAll+'</td></tr></tfoot></table></div>';
   html += '<div class="rpt-section"><h3>部署別集計</h3>';
-  html += '<table class="rpt-table"><thead><tr><th>部署</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>合計</th></tr></thead><tbody>';
+  html += '<table class="rpt-table"><thead><tr><th>部署</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>合計</th></tr></thead><tbody>';
   var deptKeys = Object.keys(deptData).sort();
-  var sumB=0,sumL=0,sumD=0,sumDD=0,sumKB=0,sumKL=0,sumKD=0;
+  var sumB=0,sumL=0,sumD=0,sumDD=0;
   for (var i=0; i<deptKeys.length; i++) {
     var dp = deptData[deptKeys[i]];
-    var dpTot = dp.b+dp.l+dp.d+dp.dd+dp.kb+dp.kl+dp.kd;
-    html += '<tr><td>'+esc(deptKeys[i])+'</td><td>'+dp.b+'</td><td>'+dp.l+'</td><td>'+dp.d+'</td><td>'+dp.dd+'</td><td>'+dp.kb+'</td><td>'+dp.kl+'</td><td>'+dp.kd+'</td><td>'+dpTot+'</td></tr>';
-    sumB+=dp.b; sumL+=dp.l; sumD+=dp.d; sumDD+=dp.dd; sumKB+=dp.kb; sumKL+=dp.kl; sumKD+=dp.kd;
+    html += '<tr><td>'+esc(deptKeys[i])+'</td><td>'+dp.b+'</td><td>'+dp.l+'</td><td>'+dp.d+'</td><td>'+dp.dd+'</td><td>'+(dp.b+dp.l+dp.d+dp.dd)+'</td></tr>';
+    sumB+=dp.b; sumL+=dp.l; sumD+=dp.d; sumDD+=dp.dd;
   }
-  html += '</tbody><tfoot><tr><td>合計</td><td>'+sumB+'</td><td>'+sumL+'</td><td>'+sumD+'</td><td>'+sumDD+'</td><td>'+sumKB+'</td><td>'+sumKL+'</td><td>'+sumKD+'</td><td>'+(sumB+sumL+sumD+sumDD+sumKB+sumKL+sumKD)+'</td></tr></tfoot></table></div>';
+  html += '</tbody><tfoot><tr><td>合計</td><td>'+sumB+'</td><td>'+sumL+'</td><td>'+sumD+'</td><td>'+sumDD+'</td><td>'+(sumB+sumL+sumD+sumDD)+'</td></tr></tfoot></table></div>';
+  html += '<div class="rpt-section"><h3>医師別 検査食統計</h3>';
+  html += buildKensaSummaryTable(y, m, 'rpt-table');
+  html += '</div>';
   html += '<div class="rpt-section"><h3>日別内訳</h3>';
   html += '<table class="rpt-table"><thead><tr><th>日</th><th>曜日</th><th>朝食</th><th>昼食</th><th>夕食</th><th>夕食医師</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>合計</th></tr></thead><tbody>';
   for (var i=0; i<dailyData.length; i++) {
@@ -828,6 +856,160 @@ function runReport() {
   document.getElementById('rpt-result').innerHTML = html;
 }
 
+function getKensaDoctorStats(y, m) {
+  var days = daysInMonth(y, m);
+  var stats = {};
+  var meals = ['b','l','d'];
+  for (var d=1; d<=days; d++) {
+    for (var j=0; j<meals.length; j++) {
+      var sid = getKensaAssign(y, m, d, meals[j]);
+      if (!sid) continue;
+      if (!stats[sid]) stats[sid] = {b:0,l:0,d:0};
+      stats[sid][meals[j]]++;
+    }
+  }
+  return stats;
+}
+
+function buildKensaSummaryTable(y, m, tableClass) {
+  var stats = getKensaDoctorStats(y, m);
+  var ids = Object.keys(stats).sort();
+  var html = '<table class="'+tableClass+'"><thead><tr><th>職員ID</th><th>氏名</th><th>部署</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>合計</th></tr></thead><tbody>';
+  if (ids.length === 0) {
+    html += '<tr><td colspan="7" style="text-align:center;color:#999">割り当てなし</td></tr>';
+  }
+  var sumB=0, sumL=0, sumD=0;
+  for (var i=0; i<ids.length; i++) {
+    var st = stats[ids[i]];
+    var s = getStaffById(ids[i]);
+    var name = s ? s.name : '';
+    var dept = s ? s.dept : '';
+    html += '<tr><td>'+esc(ids[i])+'</td><td>'+esc(name)+'</td><td>'+esc(dept)+'</td>';
+    html += '<td>'+st.b+'</td><td>'+st.l+'</td><td>'+st.d+'</td><td>'+(st.b+st.l+st.d)+'</td></tr>';
+    sumB+=st.b; sumL+=st.l; sumD+=st.d;
+  }
+  html += '</tbody>';
+  if (ids.length > 0) {
+    html += '<tfoot><tr><td colspan="3">合計</td><td>'+sumB+'</td><td>'+sumL+'</td><td>'+sumD+'</td><td>'+(sumB+sumL+sumD)+'</td></tr></tfoot>';
+  }
+  html += '</table>';
+  return html;
+}
+
+function exportKensaCSV() {
+  var y = parseInt(document.getElementById('rpt-year').value);
+  var m = parseInt(document.getElementById('rpt-month').value);
+  var stats = getKensaDoctorStats(y, m);
+  var ids = Object.keys(stats).sort();
+  if (ids.length === 0) { showToast('検査食の割り当てがありません'); return; }
+  var csv = '﻿職員ID,氏名,部署,検査朝,検査昼,検査夕,合計\n';
+  for (var i=0; i<ids.length; i++) {
+    var st = stats[ids[i]];
+    var s = getStaffById(ids[i]);
+    var name = s ? s.name : '';
+    var dept = s ? s.dept : '';
+    csv += '"'+ids[i].replace(/"/g,'""')+'","'+name.replace(/"/g,'""')+'","'+dept.replace(/"/g,'""')+'",';
+    csv += st.b+','+st.l+','+st.d+','+(st.b+st.l+st.d)+'\n';
+  }
+  downloadFile(csv, '検査食統計_'+y+'年'+pad(m)+'月.csv', 'text/csv;charset=utf-8');
+  showToast('検査食統計CSVを出力しました');
+}
+
+// ==================== KENSA TAB ====================
+function initKensaTab() {
+  var ySel = document.getElementById('kensa-year');
+  var mSel = document.getElementById('kensa-month');
+  if (ySel.options.length === 0) {
+    var now = new Date();
+    for (var y=now.getFullYear()-1; y<=now.getFullYear()+2; y++) {
+      var opt = document.createElement('option'); opt.value=y; opt.textContent=y; ySel.appendChild(opt);
+    }
+    for (var m=1; m<=12; m++) {
+      var opt = document.createElement('option'); opt.value=m; opt.textContent=m; mSel.appendChild(opt);
+    }
+    ySel.value = now.getFullYear(); mSel.value = now.getMonth()+1;
+  }
+  fetch(API_URL + '?key=kensa').then(function(r) { return r.json(); }).then(function(serverKensa) {
+    kensa = serverKensa || {};
+    renderKensaGrid();
+  }).catch(function() {
+    renderKensaGrid();
+  });
+}
+
+function renderKensaGrid() {
+  var wrap = document.getElementById('kensa-grid-wrap');
+  var y = parseInt(document.getElementById('kensa-year').value);
+  var m = parseInt(document.getElementById('kensa-month').value);
+  var days = daysInMonth(y, m);
+  var todayStr = fmtDate(new Date());
+  var sorted = getStaffSorted();
+  var opts = '<option value="">-- 未割当 --</option>';
+  for (var i=0; i<sorted.length; i++) {
+    opts += '<option value="'+esc(sorted[i].id)+'">'+esc(sorted[i].id+' '+sorted[i].name)+'</option>';
+  }
+  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜日</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>備考</th></tr></thead><tbody>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    var ds = y+'-'+pad(m)+'-'+pad(d);
+    var hName = getHolidayName(ds);
+    var cls = '';
+    if (hName) cls='day-holiday'; else if (dow===0) cls='day-sun'; else if (dow===6) cls='day-sat';
+    if (ds===todayStr) cls += ' day-today';
+    html += '<tr class="'+cls+'">';
+    html += '<td>'+d+'</td><td>'+WEEKDAYS[dow]+'</td>';
+    html += '<td><select class="kensa-sel" data-d="'+d+'" data-m="b">'+opts+'</select></td>';
+    html += '<td><select class="kensa-sel" data-d="'+d+'" data-m="l">'+opts+'</select></td>';
+    html += '<td><select class="kensa-sel" data-d="'+d+'" data-m="d">'+opts+'</select></td>';
+    html += '<td style="text-align:left;font-size:0.8rem;color:#999">'+(hName||'')+'</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  var sels = wrap.querySelectorAll('select.kensa-sel');
+  for (var i=0; i<sels.length; i++) {
+    var day = parseInt(sels[i].getAttribute('data-d'));
+    var meal = sels[i].getAttribute('data-m');
+    sels[i].value = getKensaAssign(y, m, day, meal);
+    sels[i].addEventListener('change', function() {
+      var dd = parseInt(this.getAttribute('data-d'));
+      var mm = this.getAttribute('data-m');
+      setKensaAssign(y, m, dd, mm, this.value);
+      renderKensaSummary(y, m);
+    });
+  }
+  renderKensaSummary(y, m);
+}
+
+function setKensaAssign(y, m, d, meal, staffId) {
+  var ym = y+'-'+pad(m);
+  if (!kensa[ym]) kensa[ym] = {};
+  if (!kensa[ym][d]) kensa[ym][d] = {};
+  if (staffId) kensa[ym][d][meal] = staffId; else delete kensa[ym][d][meal];
+  var partial = {};
+  partial[ym] = {};
+  partial[ym][d] = kensa[ym][d];
+  apiMerge('kensa', partial, 2);
+}
+
+function renderKensaSummary(y, m) {
+  var tb = document.getElementById('kensa-summary-list');
+  var stats = getKensaDoctorStats(y, m);
+  var ids = Object.keys(stats).sort();
+  if (ids.length === 0) {
+    tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#999">割り当てなし</td></tr>';
+    return;
+  }
+  var html = '';
+  for (var i=0; i<ids.length; i++) {
+    var st = stats[ids[i]];
+    var s = getStaffById(ids[i]);
+    html += '<tr><td>'+esc(ids[i])+'</td><td>'+esc(s?s.name:'')+'</td><td>'+esc(s?s.dept:'')+'</td>';
+    html += '<td>'+st.b+'</td><td>'+st.l+'</td><td>'+st.d+'</td><td>'+(st.b+st.l+st.d)+'</td></tr>';
+  }
+  tb.innerHTML = html;
+}
+
 function runDetailReport() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
@@ -837,16 +1019,13 @@ function runDetailReport() {
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
     var hasOrder = false;
-    var totals = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
+    var totals = {b:0,l:0,d:0,dd:0};
     for (var d=1; d<=days; d++) {
       var o = getOrder(s.id, y, m, d);
       if (o.b) { totals.b++; hasOrder=true; }
       if (o.l) { totals.l++; hasOrder=true; }
       if (o.d) { totals.d++; hasOrder=true; }
       if (o.dd) { totals.dd++; hasOrder=true; }
-      if (o.kb) { totals.kb++; hasOrder=true; }
-      if (o.kl) { totals.kl++; hasOrder=true; }
-      if (o.kd) { totals.kd++; hasOrder=true; }
     }
     if (hasOrder) staffWithOrders.push({staff:s, totals:totals});
   }
@@ -859,13 +1038,13 @@ function runDetailReport() {
   html += '<th rowspan="2">ID</th><th rowspan="2">氏名</th><th rowspan="2">部署</th>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
-    html += '<th colspan="7" style="border-bottom:none;';
+    html += '<th colspan="4" style="border-bottom:none;';
     if (dow===0) html += 'background:#fce4ec;';
     else if (dow===6) html += 'background:#e8eaf6;';
     else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) html += 'background:#fff8e1;';
     html += '">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dow]+'</span></th>';
   }
-  html += '<th colspan="7" style="border-bottom:none;">合計</th>';
+  html += '<th colspan="4" style="border-bottom:none;">合計</th>';
   html += '</tr><tr>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
@@ -877,17 +1056,11 @@ function runDetailReport() {
     html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">昼</th>';
     html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">夕</th>';
     html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">医</th>';
-    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">検朝</th>';
-    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">検昼</th>';
-    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">検夕</th>';
   }
   html += '<th style="font-size:0.65rem;padding:2px;">朝</th>';
   html += '<th style="font-size:0.65rem;padding:2px;">昼</th>';
   html += '<th style="font-size:0.65rem;padding:2px;">夕</th>';
   html += '<th style="font-size:0.65rem;padding:2px;">医</th>';
-  html += '<th style="font-size:0.65rem;padding:2px;">検朝</th>';
-  html += '<th style="font-size:0.65rem;padding:2px;">検昼</th>';
-  html += '<th style="font-size:0.65rem;padding:2px;">検夕</th>';
   html += '</tr></thead><tbody>';
   for (var i=0; i<staffWithOrders.length; i++) {
     var sw = staffWithOrders[i];
@@ -907,17 +1080,11 @@ function runDetailReport() {
       html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.l?'○':'')+'</td>';
       html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.d?'○':'')+'</td>';
       html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.dd?'○':'')+'</td>';
-      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.kb?'○':'')+'</td>';
-      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.kl?'○':'')+'</td>';
-      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.kd?'○':'')+'</td>';
     }
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.b+'</td>';
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.l+'</td>';
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.d+'</td>';
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.dd+'</td>';
-    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.kb+'</td>';
-    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.kl+'</td>';
-    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.kd+'</td>';
     html += '</tr>';
   }
   html += '</tbody></table></div></div>';
@@ -933,7 +1100,7 @@ function exportDetailExcel() {
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
     var hasOrder = false;
-    var totals = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
+    var totals = {b:0,l:0,d:0,dd:0};
     var perDay = [];
     for (var d=1; d<=days; d++) {
       var o = getOrder(s.id, y, m, d);
@@ -942,9 +1109,6 @@ function exportDetailExcel() {
       if (o.l) { totals.l++; hasOrder=true; }
       if (o.d) { totals.d++; hasOrder=true; }
       if (o.dd) { totals.dd++; hasOrder=true; }
-      if (o.kb) { totals.kb++; hasOrder=true; }
-      if (o.kl) { totals.kl++; hasOrder=true; }
-      if (o.kd) { totals.kd++; hasOrder=true; }
     }
     if (hasOrder) staffWithOrders.push({staff:s, totals:totals, perDay:perDay});
   }
@@ -967,7 +1131,7 @@ function exportDetailExcel() {
   html += '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>';
   html += '</head><body>';
   html += '<table border="1" style="border-collapse:collapse;font-size:10px">';
-  html += '<tr><td colspan="'+(3+days*7+7)+'" style="font-size:14px;font-weight:bold;padding:6px">'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</td></tr>';
+  html += '<tr><td colspan="'+(3+days*4+4)+'" style="font-size:14px;font-weight:bold;padding:6px">'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</td></tr>';
   html += '<tr>';
   html += '<td rowspan="2" style="'+th+'">ID</td>';
   html += '<td rowspan="2" style="'+th+'">氏名</td>';
@@ -978,9 +1142,9 @@ function exportDetailExcel() {
     if (dow===0) bg = sun;
     else if (dow===6) bg = sat;
     else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
-    html += '<td colspan="7" style="'+th+bg+'">'+d+'日('+WEEKDAYS[dow]+')</td>';
+    html += '<td colspan="4" style="'+th+bg+'">'+d+'日('+WEEKDAYS[dow]+')</td>';
   }
-  html += '<td colspan="7" style="'+th+'">合計</td>';
+  html += '<td colspan="4" style="'+th+'">合計</td>';
   html += '</tr>';
   html += '<tr>';
   for (var d=1; d<=days; d++) {
@@ -993,17 +1157,11 @@ function exportDetailExcel() {
     html += '<td style="'+th+bg+'">昼</td>';
     html += '<td style="'+th+bg+'">夕</td>';
     html += '<td style="'+th+bg+'">医</td>';
-    html += '<td style="'+th+bg+'">検朝</td>';
-    html += '<td style="'+th+bg+'">検昼</td>';
-    html += '<td style="'+th+bg+'">検夕</td>';
   }
   html += '<td style="'+th+'">朝</td>';
   html += '<td style="'+th+'">昼</td>';
   html += '<td style="'+th+'">夕</td>';
   html += '<td style="'+th+'">医</td>';
-  html += '<td style="'+th+'">検朝</td>';
-  html += '<td style="'+th+'">検昼</td>';
-  html += '<td style="'+th+'">検夕</td>';
   html += '</tr>';
   for (var i=0; i<staffWithOrders.length; i++) {
     var sw = staffWithOrders[i];
@@ -1023,17 +1181,11 @@ function exportDetailExcel() {
       html += '<td style="'+td+bg+'">'+(o.l?'○':'')+'</td>';
       html += '<td style="'+td+bg+'">'+(o.d?'○':'')+'</td>';
       html += '<td style="'+td+bg+'">'+(o.dd?'○':'')+'</td>';
-      html += '<td style="'+td+bg+'">'+(o.kb?'○':'')+'</td>';
-      html += '<td style="'+td+bg+'">'+(o.kl?'○':'')+'</td>';
-      html += '<td style="'+td+bg+'">'+(o.kd?'○':'')+'</td>';
     }
     html += '<td style="'+tdB+'">'+sw.totals.b+'</td>';
     html += '<td style="'+tdB+'">'+sw.totals.l+'</td>';
     html += '<td style="'+tdB+'">'+sw.totals.d+'</td>';
     html += '<td style="'+tdB+'">'+sw.totals.dd+'</td>';
-    html += '<td style="'+tdB+'">'+sw.totals.kb+'</td>';
-    html += '<td style="'+tdB+'">'+sw.totals.kl+'</td>';
-    html += '<td style="'+tdB+'">'+sw.totals.kd+'</td>';
     html += '</tr>';
   }
   html += '</table></body></html>';
@@ -1054,19 +1206,18 @@ function exportReportCSV() {
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
   var sorted = getStaffSorted();
-  var csv = '﻿職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,検査朝,検査昼,検査夕,合計\n';
+  var csv = '﻿職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,合計\n';
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
-    var t = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
+    var t = {b:0,l:0,d:0,dd:0};
     for (var d=1; d<=days; d++) {
       var o = getOrder(s.id, y, m, d);
       if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
-      if (o.kb) t.kb++; if (o.kl) t.kl++; if (o.kd) t.kd++;
     }
-    var total = t.b + t.l + t.d + t.dd + t.kb + t.kl + t.kd;
+    var total = t.b + t.l + t.d + t.dd;
     if (total === 0) continue;
     csv += '"'+s.id.replace(/"/g,'""')+'","'+s.name.replace(/"/g,'""')+'","'+s.dept.replace(/"/g,'""')+'",';
-    csv += t.b+','+t.l+','+t.d+','+t.dd+','+t.kb+','+t.kl+','+t.kd+','+total+'\n';
+    csv += t.b+','+t.l+','+t.d+','+t.dd+','+total+'\n';
   }
   downloadFile(csv, '月間注文集計_'+y+'年'+pad(m)+'月.csv', 'text/csv;charset=utf-8');
   showToast('CSVを出力しました');
@@ -1285,7 +1436,7 @@ function updatePwStatus() {
 }
 
 function dataExport() {
-  var data = { staff: staffList, orders: orders, holidays: holidays, history: opHistory, children: children, config: config, confirmed: confirmed, exportDate: fmtDate(new Date()) };
+  var data = { staff: staffList, orders: orders, holidays: holidays, history: opHistory, children: children, config: config, confirmed: confirmed, kensa: kensa, exportDate: fmtDate(new Date()) };
   var json = JSON.stringify(data, null, 2);
   downloadFile(json, '給食管理データ_'+fmtDate(new Date())+'.json', 'application/json');
   showToast('エクスポートしました');
@@ -1306,7 +1457,8 @@ function dataImport() {
       if (data.children) children = data.children;
       if (data.config) config = data.config;
       if (data.confirmed) confirmed = data.confirmed;
-      saveStaff(); saveOrders(); saveHolidays(); saveHistory(); saveChildren(); saveConfig(); saveConfirmed();
+      if (data.kensa) kensa = data.kensa;
+      saveStaff(); saveOrders(); saveHolidays(); saveHistory(); saveChildren(); saveConfig(); saveConfirmed(); saveKensa();
       showToast('インポートしました');
       showTab('today');
     } catch(ex) { showToast('ファイル形式が不正です'); }
@@ -1316,8 +1468,8 @@ function dataImport() {
 
 function dataClear() {
   if (!confirm('全データを削除します。この操作は元に戻せません。\n本当に削除しますか？')) return;
-  staffList=[]; orders={}; holidays=[]; opHistory=[]; children=[]; config={}; confirmed={};
-  saveStaff(); saveOrders(); saveHolidays(); saveHistory(); saveChildren(); saveConfig(); saveConfirmed();
+  staffList=[]; orders={}; holidays=[]; opHistory=[]; children=[]; config={}; confirmed={}; kensa={};
+  saveStaff(); saveOrders(); saveHolidays(); saveHistory(); saveChildren(); saveConfig(); saveConfirmed(); saveKensa();
   showToast('全データを削除しました');
   showTab('today');
 }
@@ -1403,9 +1555,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('bulk-weekday-l').addEventListener('click', function(){bulkSetWeekday('l');});
     document.getElementById('bulk-weekday-d').addEventListener('click', function(){bulkSetWeekday('d');});
     document.getElementById('bulk-weekday-dd').addEventListener('click', function(){bulkSetWeekday('dd');});
-    document.getElementById('bulk-weekday-kb').addEventListener('click', function(){bulkSetWeekday('kb');});
-    document.getElementById('bulk-weekday-kl').addEventListener('click', function(){bulkSetWeekday('kl');});
-    document.getElementById('bulk-weekday-kd').addEventListener('click', function(){bulkSetWeekday('kd');});
     document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
     document.getElementById('bulk-clear').addEventListener('click', bulkClear);
     document.getElementById('order-confirm').addEventListener('click', confirmOrder);
@@ -1414,6 +1563,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('rpt-run').addEventListener('click', runReport);
     document.getElementById('rpt-detail').addEventListener('click', runDetailReport);
     document.getElementById('rpt-detail-excel').addEventListener('click', exportDetailExcel);
+    document.getElementById('rpt-kensa-csv').addEventListener('click', exportKensaCSV);
+    document.getElementById('kensa-year').addEventListener('change', renderKensaGrid);
+    document.getElementById('kensa-month').addEventListener('change', renderKensaGrid);
     document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 

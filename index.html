@@ -16,6 +16,7 @@
       <button class="tab-btn admin-only" data-tab="report" style="display:none">集計</button>
       <button class="tab-btn" data-tab="history">入力履歴</button>
       <button class="tab-btn admin-only" data-tab="staff" style="display:none">職員マスタ</button>
+      <button class="tab-btn admin-only" data-tab="kensa" style="display:none">検査食管理</button>
       <button class="tab-btn admin-only" data-tab="holiday" style="display:none">休日マスタ</button>
       <button class="tab-btn admin-only" data-tab="backup" style="display:none">データ管理</button>
       <button class="tab-btn tab-btn-admin" id="admin-toggle">管理者</button>
@@ -58,19 +59,13 @@
           <tbody id="dd-list"></tbody></table>
         </div>
         <div class="meal-card">
-          <h3>検査食朝 <span id="kb-count" class="badge">0</span></h3>
-          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
-          <tbody id="kb-list"></tbody></table>
-        </div>
-        <div class="meal-card">
-          <h3>検査食昼 <span id="kl-count" class="badge">0</span></h3>
-          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
-          <tbody id="kl-list"></tbody></table>
-        </div>
-        <div class="meal-card">
-          <h3>検査食夕 <span id="kd-count" class="badge">0</span></h3>
-          <table><thead><tr><th>ID</th><th>氏名</th><th>部署</th></tr></thead>
-          <tbody id="kd-list"></tbody></table>
+          <h3>検査食（担当医師）</h3>
+          <table><thead><tr><th>食事</th><th>担当医師</th></tr></thead>
+          <tbody>
+            <tr><td>朝</td><td id="kensa-today-b" style="color:#999">未割当</td></tr>
+            <tr><td>昼</td><td id="kensa-today-l" style="color:#999">未割当</td></tr>
+            <tr><td>夕</td><td id="kensa-today-d" style="color:#999">未割当</td></tr>
+          </tbody></table>
         </div>
       </div>
     </section>
@@ -99,11 +94,6 @@
           <button class="btn btn-outline" id="bulk-weekday-d">平日夕食</button>
           <button class="btn btn-outline" id="bulk-weekday-dd">平日夕医師</button>
           <button class="btn btn-outline" id="bulk-copy-prev">前月コピー</button>
-        </div>
-        <div class="control-row">
-          <button class="btn btn-outline" id="bulk-weekday-kb">平日検査朝</button>
-          <button class="btn btn-outline" id="bulk-weekday-kl">平日検査昼</button>
-          <button class="btn btn-outline" id="bulk-weekday-kd">平日検査夕</button>
           <button class="btn btn-danger-outline" id="bulk-clear">全クリア</button>
         </div>
       </div>
@@ -112,7 +102,7 @@
       </div>
       <div id="order-summary" style="display:none">
         <strong>合計:</strong>
-        朝食 <span id="os-b">0</span> / 昼食 <span id="os-l">0</span> / 夕食 <span id="os-d">0</span> / 夕食医師 <span id="os-dd">0</span> / 検査朝 <span id="os-kb">0</span> / 検査昼 <span id="os-kl">0</span> / 検査夕 <span id="os-kd">0</span>
+        朝食 <span id="os-b">0</span>食 / 昼食 <span id="os-l">0</span>食 / 夕食 <span id="os-d">0</span>食 / 夕食医師 <span id="os-dd">0</span>食
       </div>
       <div id="order-actions" style="display:none" class="order-actions">
         <span id="order-status" class="order-status"></span>
@@ -133,6 +123,7 @@
         <button class="btn btn-outline" id="rpt-detail">全注文者一覧</button>
         <button class="btn btn-outline" id="rpt-detail-excel">全注文者一覧Excel出力</button>
         <button class="btn btn-outline" id="rpt-csv">CSV出力</button>
+        <button class="btn btn-outline" id="rpt-kensa-csv">検査食統計CSV</button>
         <button class="btn btn-outline" id="rpt-print">印刷</button>
       </div>
       <div id="rpt-result"></div>
@@ -215,6 +206,28 @@
         <table class="data-table">
           <thead><tr><th>日時</th><th>職員</th><th>対象月</th><th>操作</th><th>詳細</th></tr></thead>
           <tbody id="history-list"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 検査食管理 -->
+    <section id="tab-kensa" class="tab-content">
+      <h2>検査食管理</h2>
+      <div class="card">
+        <div class="control-row">
+          <label>年月:
+            <select id="kensa-year"></select>年
+            <select id="kensa-month"></select>月
+          </label>
+          <span class="help-text">各日の朝・昼・夕に検査食を食べる医師を割り当ててください。変更は自動保存されます。</span>
+        </div>
+        <div id="kensa-grid-wrap"></div>
+      </div>
+      <div class="card">
+        <h3>医師別 検査食集計（表示中の月）</h3>
+        <table class="data-table">
+          <thead><tr><th>職員ID</th><th>氏名</th><th>部署</th><th>検査朝</th><th>検査昼</th><th>検査夕</th><th>合計</th></tr></thead>
+          <tbody id="kensa-summary-list"></tbody>
         </table>
       </div>
     </section>

@@ -9,13 +9,14 @@ if (!is_dir($dataDir)) {
 
 $allowed = array(
     'staff', 'orders', 'holidays', 'history', 'children', 'config',
-    'confirmed', 'hoiku_orders', 'hoiku_history', 'hoiku_confirmed'
+    'confirmed', 'hoiku_orders', 'hoiku_history', 'hoiku_confirmed', 'kensa'
 );
 
 $defaults = array(
     'staff'=>'[]', 'orders'=>'{}', 'holidays'=>'[]', 'history'=>'[]',
     'children'=>'[]', 'config'=>'{}', 'confirmed'=>'{}',
-    'hoiku_orders'=>'{}', 'hoiku_history'=>'[]', 'hoiku_confirmed'=>'{}'
+    'hoiku_orders'=>'{}', 'hoiku_history'=>'[]', 'hoiku_confirmed'=>'{}',
+    'kensa'=>'{}'
 );
 
 $key = isset($_GET['key']) ? $_GET['key'] : '';
