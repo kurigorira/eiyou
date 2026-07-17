@@ -1165,6 +1165,33 @@ function setKensaAssign(y, m, d, meal, staffId) {
   apiMerge('kensa', partial, 2);
 }
 
+function saveKensaMonth() {
+  var y = parseInt(document.getElementById('kensa-year').value);
+  var m = parseInt(document.getElementById('kensa-month').value);
+  var ym = y+'-'+pad(m);
+  var statusEl = document.getElementById('kensa-save-status');
+  statusEl.textContent = '登録中...';
+  var partial = {};
+  partial[ym] = kensa[ym] || {};
+  fetch(API_URL + '?key=kensa&action=merge', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(partial)
+  }).then(function(r) { return r.json(); }).then(function(res) {
+    if (res && res.ok) {
+      statusEl.textContent = '登録しました（' + new Date().toLocaleTimeString('ja-JP') + '）';
+      showToast(y+'年'+m+'月の検査食割り当てを登録しました');
+    } else {
+      statusEl.textContent = '登録に失敗しました';
+      var msg = res && res.error ? res.error : '不明なエラー';
+      alert('登録に失敗しました: ' + msg + '\n\nサーバーの api.php が古い可能性があります。api.php を最新版に更新してください。');
+    }
+  }).catch(function(e) {
+    statusEl.textContent = '登録に失敗しました';
+    alert('登録に失敗しました（通信エラー）: ' + e.message);
+  });
+}
+
 function renderKensaSummary(y, m) {
   var tb = document.getElementById('kensa-summary-list');
   var stats = getKensaDoctorStats(y, m);
@@ -1741,6 +1768,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('rpt-eiyou-excel').addEventListener('click', exportEiyouExcel);
     document.getElementById('kensa-year').addEventListener('change', renderKensaGrid);
     document.getElementById('kensa-month').addEventListener('change', renderKensaGrid);
+    document.getElementById('kensa-save').addEventListener('click', saveKensaMonth);
     document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 

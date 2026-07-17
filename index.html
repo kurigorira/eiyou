@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>職員給食注文管理システム</title>
-<link rel="stylesheet" href="style.css?v=20260716">
+<link rel="stylesheet" href="style.css?v=20260717">
 </head>
 <body>
 <div id="app">
@@ -221,9 +221,13 @@
             <select id="kensa-year"></select>年
             <select id="kensa-month"></select>月
           </label>
-          <span class="help-text">各日の朝・昼・夕に検査食を食べる医師を割り当ててください。変更は自動保存されます。</span>
+          <span class="help-text">各日の朝・昼・夕に検査食を食べる医師を割り当ててください。最後に「登録」ボタンを押してください。</span>
         </div>
         <div id="kensa-grid-wrap"></div>
+        <div class="control-row" style="margin-top:12px">
+          <button class="btn" id="kensa-save">登録</button>
+          <span id="kensa-save-status" class="help-text"></span>
+        </div>
       </div>
       <div class="card">
         <h3>医師別 検査食集計（表示中の月）</h3>
@@ -295,6 +299,6 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="app.js?v=20260716"></script>
+<script src="app.js?v=20260717"></script>
 </body>
 </html>
