@@ -945,11 +945,14 @@ function buildMealCountData(y, m) {
 }
 
 function fetchOrdersThen(fn) {
+  var run = function() {
+    try { fn(); } catch(ex) { alert('出力エラー: ' + ex.message); }
+  };
   fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
     orders = serverOrders || {};
-    fn();
+    run();
   }).catch(function() {
-    fn();
+    run();
   });
 }
 
