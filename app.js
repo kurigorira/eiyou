@@ -1192,6 +1192,76 @@ function saveKensaMonth() {
   });
 }
 
+function exportKensaExcel() {
+  var y = parseInt(document.getElementById('kensa-year').value);
+  var m = parseInt(document.getElementById('kensa-month').value);
+  var days = daysInMonth(y, m);
+  var sat = 'background:#e8eaf6;';
+  var sun = 'background:#fce4ec;';
+  var hol = 'background:#fff8e1;';
+  var th = 'border:1px solid #000;padding:3px 8px;text-align:center;font-weight:bold;background:#f0f0f0;';
+  var td = 'border:1px solid #000;padding:3px 8px;text-align:center;';
+  var tdL = 'border:1px solid #000;padding:3px 8px;text-align:left;';
+  function doctorName(sid) {
+    if (!sid) return '';
+    var s = getStaffById(sid);
+    return s ? s.name : sid;
+  }
+  var html = '<table border="1" style="border-collapse:collapse;font-size:11px">';
+  html += '<tr><td colspan="6" style="font-size:16px;font-weight:bold;text-align:center;padding:8px;border:none">'+y+'年　'+m+'月　　検査食割り当て表</td></tr>';
+  html += '<tr>';
+  html += '<td style="'+th+'">日</td><td style="'+th+'">曜日</td>';
+  html += '<td style="'+th+'">検査朝</td><td style="'+th+'">検査昼</td><td style="'+th+'">検査夕</td>';
+  html += '<td style="'+th+'">備考</td>';
+  html += '</tr>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    var ds = y+'-'+pad(m)+'-'+pad(d);
+    var hName = getHolidayName(ds);
+    var bg = '';
+    if (hName) bg = hol; else if (dow===0) bg = sun; else if (dow===6) bg = sat;
+    html += '<tr>';
+    html += '<td style="'+td+bg+'">'+d+'</td>';
+    html += '<td style="'+td+bg+'">'+WEEKDAYS[dow]+'</td>';
+    html += '<td style="'+td+bg+'">'+esc(doctorName(getKensaAssign(y, m, d, 'b')))+'</td>';
+    html += '<td style="'+td+bg+'">'+esc(doctorName(getKensaAssign(y, m, d, 'l')))+'</td>';
+    html += '<td style="'+td+bg+'">'+esc(doctorName(getKensaAssign(y, m, d, 'd')))+'</td>';
+    html += '<td style="'+tdL+bg+'">'+esc(hName||'')+'</td>';
+    html += '</tr>';
+  }
+  html += '</table>';
+  html += '<br>';
+  html += '<table border="1" style="border-collapse:collapse;font-size:11px">';
+  html += '<tr><td colspan="7" style="font-weight:bold;padding:4px;border:none">医師別 検査食集計</td></tr>';
+  html += '<tr>';
+  html += '<td style="'+th+'">職員ID</td><td style="'+th+'">氏名</td><td style="'+th+'">部署</td>';
+  html += '<td style="'+th+'">検査朝</td><td style="'+th+'">検査昼</td><td style="'+th+'">検査夕</td><td style="'+th+'">合計</td>';
+  html += '</tr>';
+  var stats = getKensaDoctorStats(y, m);
+  var ids = Object.keys(stats).sort();
+  var sumB=0, sumL=0, sumD=0;
+  for (var i=0; i<ids.length; i++) {
+    var st = stats[ids[i]];
+    var s = getStaffById(ids[i]);
+    html += '<tr>';
+    html += '<td style="'+tdL+'">'+esc(ids[i])+'</td>';
+    html += '<td style="'+tdL+'">'+esc(s?s.name:'')+'</td>';
+    html += '<td style="'+tdL+'">'+esc(s?s.dept:'')+'</td>';
+    html += '<td style="'+td+'">'+st.b+'</td><td style="'+td+'">'+st.l+'</td><td style="'+td+'">'+st.d+'</td>';
+    html += '<td style="'+td+'font-weight:bold">'+(st.b+st.l+st.d)+'</td>';
+    html += '</tr>';
+    sumB+=st.b; sumL+=st.l; sumD+=st.d;
+  }
+  html += '<tr>';
+  html += '<td colspan="3" style="'+th+'">合計</td>';
+  html += '<td style="'+th+'">'+sumB+'</td><td style="'+th+'">'+sumL+'</td><td style="'+th+'">'+sumD+'</td>';
+  html += '<td style="'+th+'">'+(sumB+sumL+sumD)+'</td>';
+  html += '</tr>';
+  html += '</table>';
+  downloadXls(xlsWrap('検査食割り当て', html), '検査食割り当て表_'+y+'年'+pad(m)+'月.xls');
+  showToast('検査食割り当て表Excelを出力しました');
+}
+
 function renderKensaSummary(y, m) {
   var tb = document.getElementById('kensa-summary-list');
   var stats = getKensaDoctorStats(y, m);
@@ -1769,6 +1839,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('kensa-year').addEventListener('change', renderKensaGrid);
     document.getElementById('kensa-month').addEventListener('change', renderKensaGrid);
     document.getElementById('kensa-save').addEventListener('click', saveKensaMonth);
+    document.getElementById('kensa-excel').addEventListener('click', exportKensaExcel);
     document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 
