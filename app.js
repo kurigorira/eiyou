@@ -1171,21 +1171,44 @@ function saveKensaMonth() {
   var ym = y+'-'+pad(m);
   var statusEl = document.getElementById('kensa-save-status');
   statusEl.textContent = '登録中...';
+  var monthData = kensa[ym] || {};
   var partial = {};
-  partial[ym] = kensa[ym] || {};
+  partial[ym] = monthData;
   fetch(API_URL + '?key=kensa&action=merge', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(partial)
   }).then(function(r) { return r.json(); }).then(function(res) {
-    if (res && res.ok) {
-      statusEl.textContent = '登録しました（' + new Date().toLocaleTimeString('ja-JP') + '）';
-      showToast(y+'年'+m+'月の検査食割り当てを登録しました');
-    } else {
+    if (!res || !res.ok) {
       statusEl.textContent = '登録に失敗しました';
       var msg = res && res.error ? res.error : '不明なエラー';
       alert('登録に失敗しました: ' + msg + '\n\nサーバーの api.php が古い可能性があります。api.php を最新版に更新してください。');
+      return;
     }
+    // 保存後にサーバーから読み戻して本当に保存されたか検証
+    return fetch(API_URL + '?key=kensa&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(serverKensa) {
+      serverKensa = serverKensa || {};
+      var saved = serverKensa[ym] || {};
+      var mismatch = [];
+      for (var d in monthData) {
+        for (var meal in monthData[d]) {
+          if (!saved[d] || saved[d][meal] !== monthData[d][meal]) {
+            mismatch.push(d + '日');
+            break;
+          }
+        }
+      }
+      if (mismatch.length === 0) {
+        kensa = serverKensa;
+        statusEl.textContent = '登録しました（' + new Date().toLocaleTimeString('ja-JP') + '）サーバー保存確認済み';
+        showToast(y+'年'+m+'月の検査食割り当てを登録しました');
+      } else {
+        statusEl.textContent = '登録に失敗しました（サーバーに保存されていません）';
+        alert('サーバーは成功と応答しましたが、読み戻し確認で保存されていないことを検出しました（' + mismatch.join('・') + '）。\n\n' +
+          'サーバーの data フォルダ内 kensa.json の書き込み権限・読み取り専用属性を確認してください。\n' +
+          'また、サーバーの api.php が最新版か確認してください。');
+      }
+    });
   }).catch(function(e) {
     statusEl.textContent = '登録に失敗しました';
     alert('登録に失敗しました（通信エラー）: ' + e.message);

@@ -58,8 +58,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         exit;
     }
     $action = isset($_GET['action']) ? $_GET['action'] : '';
-    $fp = fopen($file, 'c+');
-    if ($fp && flock($fp, LOCK_EX)) {
+    $written = false;
+    $errMsg = '';
+    $fp = @fopen($file, 'c+');
+    if ($fp === false) {
+        $errMsg = 'ファイルを開けません: ' . $key . '.json（dataフォルダの書き込み権限、ファイルの読み取り専用属性を確認してください）';
+    } elseif (!flock($fp, LOCK_EX)) {
+        $errMsg = 'ファイルロックに失敗しました: ' . $key . '.json';
+        fclose($fp);
+    } else {
         if ($action === 'merge' && is_array($decoded)) {
             $current = '';
             $stat = fstat($fp);
@@ -91,16 +98,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                     }
                 }
             }
-            fseek($fp, 0);
-            ftruncate($fp, 0);
-            fwrite($fp, json_encode($data, JSON_UNESCAPED_UNICODE));
+            $out = json_encode($data, JSON_UNESCAPED_UNICODE);
+            if ($out === false) {
+                $errMsg = 'JSONエンコードに失敗しました（文字コードを確認してください）';
+            } else {
+                fseek($fp, 0);
+                ftruncate($fp, 0);
+                $written = (fwrite($fp, $out) !== false);
+                if (!$written) $errMsg = 'ファイル書き込みに失敗しました: ' . $key . '.json';
+            }
         } else {
             ftruncate($fp, 0);
-            fwrite($fp, $input);
+            $written = (fwrite($fp, $input) !== false);
+            if (!$written) $errMsg = 'ファイル書き込みに失敗しました: ' . $key . '.json';
         }
         fflush($fp);
         flock($fp, LOCK_UN);
         fclose($fp);
     }
-    echo json_encode(array('ok' => true));
+    if ($written) {
+        echo json_encode(array('ok' => true), JSON_UNESCAPED_UNICODE);
+    } else {
+        http_response_code(500);
+        echo json_encode(array('error' => $errMsg), JSON_UNESCAPED_UNICODE);
+    }
 }
