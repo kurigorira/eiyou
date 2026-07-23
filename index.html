@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>職員給食注文管理システム</title>
-<link rel="stylesheet" href="style.css?v=20260718">
+<link rel="stylesheet" href="style.css?v=20260719">
 </head>
 <body>
 <div id="app">
@@ -67,6 +67,20 @@
             <tr><td>夕</td><td id="kensa-today-d" style="color:#999">未割当</td></tr>
           </tbody></table>
         </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>食事数合計（注文＋検査食）</h3>
+        <table class="rpt-table" style="max-width:520px">
+          <thead><tr><th>区分</th><th>注文</th><th>検査食</th><th>合計</th></tr></thead>
+          <tbody>
+            <tr><td>朝の合計</td><td id="tot-b-order">0</td><td id="tot-b-kensa">0</td><td id="tot-b-sum">0</td></tr>
+            <tr><td>昼の合計</td><td id="tot-l-order">0</td><td id="tot-l-kensa">0</td><td id="tot-l-sum">0</td></tr>
+            <tr><td>夕の合計</td><td id="tot-d-order">0</td><td id="tot-d-kensa">0</td><td id="tot-d-sum">0</td></tr>
+            <tr><td>夕食医師の合計</td><td id="tot-dd-order">0</td><td>0</td><td id="tot-dd-sum">0</td></tr>
+            <tr><td>検査食の合計（内数）</td><td>-</td><td id="tot-k-kensa">0</td><td id="tot-k-sum">0</td></tr>
+          </tbody>
+          <tfoot><tr><td>食事総数</td><td id="tot-order-all">0</td><td id="tot-kensa-all">0</td><td id="tot-grand">0</td></tr></tfoot>
+        </table>
       </div>
     </section>
 
@@ -300,6 +314,6 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="app.js?v=20260718"></script>
+<script src="app.js?v=20260719"></script>
 </body>
 </html>

@@ -268,6 +268,28 @@ function renderTodayInner() {
   fillMealList('d-list', dList); document.getElementById('d-count').textContent = dList.length;
   fillMealList('dd-list', ddList); document.getElementById('dd-count').textContent = ddList.length;
   renderKensaToday(y, m, d);
+
+  var kb = getKensaAssign(y, m, d, 'b') ? 1 : 0;
+  var kl = getKensaAssign(y, m, d, 'l') ? 1 : 0;
+  var kd = getKensaAssign(y, m, d, 'd') ? 1 : 0;
+  var ordB = bList.length, ordL = lList.length, ordD = dList.length, ordDD = ddList.length;
+  var kTot = kb + kl + kd;
+  document.getElementById('tot-b-order').textContent = ordB;
+  document.getElementById('tot-b-kensa').textContent = kb;
+  document.getElementById('tot-b-sum').textContent = ordB + kb;
+  document.getElementById('tot-l-order').textContent = ordL;
+  document.getElementById('tot-l-kensa').textContent = kl;
+  document.getElementById('tot-l-sum').textContent = ordL + kl;
+  document.getElementById('tot-d-order').textContent = ordD;
+  document.getElementById('tot-d-kensa').textContent = kd;
+  document.getElementById('tot-d-sum').textContent = ordD + kd;
+  document.getElementById('tot-dd-order').textContent = ordDD;
+  document.getElementById('tot-dd-sum').textContent = ordDD;
+  document.getElementById('tot-k-kensa').textContent = kTot;
+  document.getElementById('tot-k-sum').textContent = kTot;
+  document.getElementById('tot-order-all').textContent = (ordB + ordL + ordD + ordDD);
+  document.getElementById('tot-kensa-all').textContent = kTot;
+  document.getElementById('tot-grand').textContent = (ordB + kb) + (ordL + kl) + (ordD + kd) + ordDD;
 }
 
 function getKensaAssign(y, m, d, meal) {
@@ -818,7 +840,18 @@ function runReportInner() {
     dailyData.push({day:d, dow:dayOfWeek(y,m,d), b:dayB, l:dayL, d:dayD, dd:dayDD, kb:dayKB, kl:dayKL, kd:dayKD});
   }
   var totalAll = totalB+totalL+totalD+totalDD+totalKB+totalKL+totalKD;
-  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 月次合計</h3>';
+  var bSum = totalB+totalKB, lSum = totalL+totalKL, dSum = totalD+totalKD, ddSum = totalDD;
+  var kSum = totalKB+totalKL+totalKD;
+  var grand = bSum+lSum+dSum+ddSum;
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 食事数合計（注文＋検査食）</h3>';
+  html += '<table class="rpt-table"><thead><tr><th>区分</th><th>注文</th><th>検査食</th><th>合計</th></tr></thead><tbody>';
+  html += '<tr><td>朝の合計</td><td>'+totalB+'</td><td>'+totalKB+'</td><td>'+bSum+'</td></tr>';
+  html += '<tr><td>昼の合計</td><td>'+totalL+'</td><td>'+totalKL+'</td><td>'+lSum+'</td></tr>';
+  html += '<tr><td>夕の合計</td><td>'+totalD+'</td><td>'+totalKD+'</td><td>'+dSum+'</td></tr>';
+  html += '<tr><td>夕食医師の合計</td><td>'+totalDD+'</td><td>0</td><td>'+ddSum+'</td></tr>';
+  html += '<tr><td>検査食の合計（内数）</td><td>-</td><td>'+kSum+'</td><td>'+kSum+'</td></tr>';
+  html += '</tbody><tfoot><tr><td>食事総数</td><td>'+(totalB+totalL+totalD+totalDD)+'</td><td>'+kSum+'</td><td>'+grand+'</td></tr></tfoot></table></div>';
+  html += '<div class="rpt-section"><h3>'+y+'年'+m+'月 月次合計</h3>';
   html += '<table class="rpt-table"><thead><tr><th>食事</th><th>食数</th></tr></thead><tbody>';
   html += '<tr><td>朝食</td><td>'+totalB+'</td></tr>';
   html += '<tr><td>昼食</td><td>'+totalL+'</td></tr>';
@@ -854,6 +887,22 @@ function runReportInner() {
   }
   html += '</tbody></table></div>';
   document.getElementById('rpt-result').innerHTML = html;
+}
+
+function getMonthlyMealTotals(y, m) {
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var t = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
+  for (var d=1; d<=days; d++) {
+    for (var i=0; i<sorted.length; i++) {
+      var o = getOrder(sorted[i].id, y, m, d);
+      if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
+    }
+    if (getKensaAssign(y, m, d, 'b')) t.kb++;
+    if (getKensaAssign(y, m, d, 'l')) t.kl++;
+    if (getKensaAssign(y, m, d, 'd')) t.kd++;
+  }
+  return t;
 }
 
 function getKensaDoctorStats(y, m) {
@@ -1423,6 +1472,20 @@ function exportDetailExcel() {
   html += '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>';
   html += '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>';
   html += '</head><body>';
+  var mt = getMonthlyMealTotals(y, m);
+  var mbSum = mt.b+mt.kb, mlSum = mt.l+mt.kl, mdSum = mt.d+mt.kd, mddSum = mt.dd;
+  var mkSum = mt.kb+mt.kl+mt.kd;
+  var mGrand = mbSum+mlSum+mdSum+mddSum;
+  html += '<table border="1" style="border-collapse:collapse;font-size:11px;margin-bottom:12px">';
+  html += '<tr><td colspan="4" style="'+tdB+'font-size:13px">'+y+'年'+m+'月 食事数合計（注文＋検査食）</td></tr>';
+  html += '<tr><td style="'+th+'">区分</td><td style="'+th+'">注文</td><td style="'+th+'">検査食</td><td style="'+th+'">合計</td></tr>';
+  html += '<tr><td style="'+tdL+'">朝の合計</td><td style="'+td+'">'+mt.b+'</td><td style="'+td+'">'+mt.kb+'</td><td style="'+tdB+'">'+mbSum+'</td></tr>';
+  html += '<tr><td style="'+tdL+'">昼の合計</td><td style="'+td+'">'+mt.l+'</td><td style="'+td+'">'+mt.kl+'</td><td style="'+tdB+'">'+mlSum+'</td></tr>';
+  html += '<tr><td style="'+tdL+'">夕の合計</td><td style="'+td+'">'+mt.d+'</td><td style="'+td+'">'+mt.kd+'</td><td style="'+tdB+'">'+mdSum+'</td></tr>';
+  html += '<tr><td style="'+tdL+'">夕食医師の合計</td><td style="'+td+'">'+mt.dd+'</td><td style="'+td+'">0</td><td style="'+tdB+'">'+mddSum+'</td></tr>';
+  html += '<tr><td style="'+tdL+'">検査食の合計（内数）</td><td style="'+td+'">-</td><td style="'+td+'">'+mkSum+'</td><td style="'+tdB+'">'+mkSum+'</td></tr>';
+  html += '<tr><td style="'+tdB+'">食事総数</td><td style="'+tdB+'">'+(mt.b+mt.l+mt.d+mt.dd)+'</td><td style="'+tdB+'">'+mkSum+'</td><td style="'+tdB+'">'+mGrand+'</td></tr>';
+  html += '</table>';
   html += '<table border="1" style="border-collapse:collapse;font-size:10px">';
   html += '<tr><td colspan="'+(3+days*4+4)+'" style="font-size:14px;font-weight:bold;padding:6px">'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</td></tr>';
   html += '<tr>';
@@ -1499,7 +1562,21 @@ function exportReportCSV() {
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
   var sorted = getStaffSorted();
-  var csv = '﻿職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,合計\n';
+  var mt = getMonthlyMealTotals(y, m);
+  var bSum = mt.b+mt.kb, lSum = mt.l+mt.kl, dSum = mt.d+mt.kd, ddSum = mt.dd;
+  var kSum = mt.kb+mt.kl+mt.kd;
+  var grand = bSum+lSum+dSum+ddSum;
+  var csv = '﻿'+y+'年'+m+'月 食事数合計（注文＋検査食）\n';
+  csv += '区分,注文,検査食,合計\n';
+  csv += '朝の合計,'+mt.b+','+mt.kb+','+bSum+'\n';
+  csv += '昼の合計,'+mt.l+','+mt.kl+','+lSum+'\n';
+  csv += '夕の合計,'+mt.d+','+mt.kd+','+dSum+'\n';
+  csv += '夕食医師の合計,'+mt.dd+',0,'+ddSum+'\n';
+  csv += '検査食の合計（内数）,-,'+kSum+','+kSum+'\n';
+  csv += '食事総数,'+(mt.b+mt.l+mt.d+mt.dd)+','+kSum+','+grand+'\n';
+  csv += '\n';
+  csv += '職員別 注文集計\n';
+  csv += '職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,合計\n';
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
     var t = {b:0,l:0,d:0,dd:0};
