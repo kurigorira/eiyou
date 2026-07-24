@@ -978,7 +978,8 @@ function buildMealCountData(y, m) {
   var sorted = getStaffSorted();
   var list = [];
   for (var d=1; d<=days; d++) {
-    var row = {day:d, bDoc:0, bGen:0, lDoc:0, lGen:0, dDoc:0, dGen:0};
+    var row = {day:d, bDoc:0, bGen:0, lDoc:0, lGen:0, dDoc:0, dGen:0,
+      kb: getKensaAssign(y,m,d,'b')?1:0, kl: getKensaAssign(y,m,d,'l')?1:0, kd: getKensaAssign(y,m,d,'d')?1:0};
     for (var i=0; i<sorted.length; i++) {
       var s = sorted[i];
       var o = getOrder(s.id, y, m, d);
@@ -1005,27 +1006,179 @@ function fetchOrdersThen(fn) {
   });
 }
 
-function xlsWrap(sheetName, bodyHtml) {
-  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
-  html += '<head><meta charset="UTF-8">';
-  html += '<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>';
-  html += '<x:Name>'+sheetName+'</x:Name>';
-  html += '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>';
-  html += '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>';
-  html += '</head><body>' + bodyHtml + '</body></html>';
-  return html;
+// ===== 本物のXLSX(OpenXML)を生成（外部ライブラリ不要・オフライン動作） =====
+// スタイル索引: 0=既定 1=見出し 2=中央罫線 3=太字合計 4=左寄せ罫線
+//   5=土曜 6=日曜 7=祝日 8=土見出し 9=日見出し 10=祝見出し 11=タイトル左 12=タイトル中央
+function xlsxColLetter(n) {
+  var s = ''; n = n + 1;
+  while (n > 0) { var r = (n-1) % 26; s = String.fromCharCode(65+r) + s; n = Math.floor((n-1)/26); }
+  return s;
 }
-
-function downloadXls(html, filename) {
-  var blob = new Blob(['﻿' + html], {type: 'application/vnd.ms-excel'});
+function xmlEsc(v) {
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function XC(v, s) { return {v: v, s: s || 0}; }
+function xlsxCellXml(rowNum, colIdx, cell) {
+  var ref = xlsxColLetter(colIdx) + rowNum;
+  var s = cell.s || 0;
+  if (cell.v === '' || cell.v === null || cell.v === undefined) return '<c r="'+ref+'" s="'+s+'"/>';
+  if (typeof cell.v === 'number') return '<c r="'+ref+'" s="'+s+'"><v>'+cell.v+'</v></c>';
+  return '<c r="'+ref+'" s="'+s+'" t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(cell.v)+'</t></is></c>';
+}
+function xlsxSheetXml(sheet) {
+  var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  if (sheet.cols && sheet.cols.length) {
+    xml += '<cols>';
+    for (var i=0; i<sheet.cols.length; i++) xml += '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+sheet.cols[i]+'" customWidth="1"/>';
+    xml += '</cols>';
+  }
+  xml += '<sheetData>';
+  for (var r=0; r<sheet.rows.length; r++) {
+    var row = sheet.rows[r];
+    xml += '<row r="'+(r+1)+'">';
+    for (var c=0; c<row.length; c++) {
+      if (row[c] === null || row[c] === undefined) continue;
+      xml += xlsxCellXml(r+1, c, row[c]);
+    }
+    xml += '</row>';
+  }
+  xml += '</sheetData>';
+  if (sheet.merges && sheet.merges.length) {
+    xml += '<mergeCells count="'+sheet.merges.length+'">';
+    for (var i=0; i<sheet.merges.length; i++) xml += '<mergeCell ref="'+sheet.merges[i]+'"/>';
+    xml += '</mergeCells>';
+  }
+  xml += '</worksheet>';
+  return xml;
+}
+function xlsxStylesXml() {
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+  + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+  + '<fonts count="3">'
+  + '<font><sz val="11"/><name val="ＭＳ Ｐゴシック"/></font>'
+  + '<font><b/><sz val="11"/><name val="ＭＳ Ｐゴシック"/></font>'
+  + '<font><b/><sz val="14"/><name val="ＭＳ Ｐゴシック"/></font>'
+  + '</fonts>'
+  + '<fills count="6">'
+  + '<fill><patternFill patternType="none"/></fill>'
+  + '<fill><patternFill patternType="gray125"/></fill>'
+  + '<fill><patternFill patternType="solid"><fgColor rgb="FFF0F0F0"/><bgColor indexed="64"/></patternFill></fill>'
+  + '<fill><patternFill patternType="solid"><fgColor rgb="FFE8EAF6"/><bgColor indexed="64"/></patternFill></fill>'
+  + '<fill><patternFill patternType="solid"><fgColor rgb="FFFCE4EC"/><bgColor indexed="64"/></patternFill></fill>'
+  + '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF8E1"/><bgColor indexed="64"/></patternFill></fill>'
+  + '</fills>'
+  + '<borders count="2">'
+  + '<border><left/><right/><top/><bottom/><diagonal/></border>'
+  + '<border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border>'
+  + '</borders>'
+  + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+  + '<cellXfs count="13">'
+  + '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+  + '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
+  + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  + '</cellXfs>'
+  + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+  + '</styleSheet>';
+}
+function xlsxSanitizeName(name) {
+  var n = String(name).replace(/[\[\]\*\?\/\\:]/g, '');
+  return n.length > 31 ? n.slice(0, 31) : (n || 'Sheet1');
+}
+function crc32(bytes) {
+  var table = crc32._t;
+  if (!table) {
+    table = crc32._t = [];
+    for (var n=0; n<256; n++) { var c=n; for (var k=0;k<8;k++) c = (c&1)?(0xEDB88320^(c>>>1)):(c>>>1); table[n]=c>>>0; }
+  }
+  var crc = 0xFFFFFFFF;
+  for (var i=0; i<bytes.length; i++) crc = (crc>>>8) ^ table[(crc ^ bytes[i]) & 0xFF];
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  var enc = new TextEncoder();
+  function u16(n){ return [n&0xFF,(n>>>8)&0xFF]; }
+  function u32(n){ return [n&0xFF,(n>>>8)&0xFF,(n>>>16)&0xFF,(n>>>24)&0xFF]; }
+  var parts = [], central = [], offset = 0;
+  for (var i=0; i<files.length; i++) {
+    var nameBytes = enc.encode(files[i].name);
+    var data = files[i].data;
+    var crc = crc32(data);
+    var local = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0));
+    parts.push(new Uint8Array(local)); parts.push(nameBytes); parts.push(data);
+    var cen = [].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset));
+    central.push(new Uint8Array(cen)); central.push(nameBytes);
+    offset += local.length + nameBytes.length + data.length;
+  }
+  var centralStart = offset, centralSize = 0;
+  for (var i=0; i<central.length; i++) centralSize += central[i].length;
+  var end = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+    u32(centralSize), u32(centralStart), u16(0)));
+  var all = parts.concat(central).concat([end]);
+  var total = 0; for (var i=0; i<all.length; i++) total += all[i].length;
+  var out = new Uint8Array(total), p = 0;
+  for (var i=0; i<all.length; i++) { out.set(all[i], p); p += all[i].length; }
+  return out;
+}
+function downloadXlsx(sheet, filename) {
+  var enc = new TextEncoder();
+  var name = xlsxSanitizeName(sheet.name);
+  var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    + '<Default Extension="xml" ContentType="application/xml"/>'
+    + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+    + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+    + '</Types>';
+  var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+    + '</Relationships>';
+  var workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + '<sheets><sheet name="'+xmlEsc(name)+'" sheetId="1" r:id="rId1"/></sheets></workbook>';
+  var workbookRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+    + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    + '</Relationships>';
+  var files = [
+    {name:'[Content_Types].xml', data: enc.encode(contentTypes)},
+    {name:'_rels/.rels', data: enc.encode(rootRels)},
+    {name:'xl/workbook.xml', data: enc.encode(workbook)},
+    {name:'xl/_rels/workbook.xml.rels', data: enc.encode(workbookRels)},
+    {name:'xl/styles.xml', data: enc.encode(xlsxStylesXml())},
+    {name:'xl/worksheets/sheet1.xml', data: enc.encode(xlsxSheetXml(sheet))}
+  ];
+  var zip = zipStore(files);
+  var blob = new Blob([zip], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+// 日ごとの塗り分けスタイル索引（通常=2, 土=5, 日=6, 祝=7 / 見出しは +3 相当を別途）
+function dayFillStyle(y, m, d, isHeader) {
+  var dow = dayOfWeek(y, m, d);
+  var hol = getHolidayName(y+'-'+pad(m)+'-'+pad(d));
+  if (isHeader) {
+    if (hol) return 10; if (dow===0) return 9; if (dow===6) return 8; return 1;
+  }
+  if (hol) return 7; if (dow===0) return 6; if (dow===6) return 5; return 2;
 }
 
 function exportSoumuExcel() {
@@ -1034,45 +1187,55 @@ function exportSoumuExcel() {
     var m = parseInt(document.getElementById('rpt-month').value);
     var data = buildMealCountData(y, m);
     var days = data.length;
-    var th = 'border:1px solid #000;padding:3px 6px;text-align:center;font-weight:bold;background:#f0f0f0;';
-    var td = 'border:1px solid #000;padding:3px 6px;text-align:center;';
-    var tdL = 'border:1px solid #000;padding:3px 6px;text-align:center;font-weight:bold;';
-    var html = '<table border="1" style="border-collapse:collapse;font-size:11px">';
-    html += '<tr><td colspan="'+(2+days+1)+'" style="font-size:16px;font-weight:bold;text-align:center;padding:8px">職員食実施食数表</td></tr>';
-    html += '<tr><td colspan="'+(2+days+1)+'" style="padding:4px;font-weight:bold">'+y+'年'+m+'月</td></tr>';
-    html += '<tr><td style="'+th+'"></td><td style="'+th+'"></td>';
-    for (var d=1; d<=days; d++) html += '<td style="'+th+'">'+d+'</td>';
-    html += '<td style="'+th+'">合計</td></tr>';
-
-    function sumRow(key) {
-      var t = 0;
-      for (var i=0; i<data.length; i++) t += data[i][key];
-      return t;
-    }
-    function rowHtml(label, rowspan, subLabel, key1, key2) {
-      var h = '<tr>';
-      if (label !== null) h += '<td rowspan="'+rowspan+'" style="'+tdL+'">'+label+'</td>';
-      h += '<td style="'+td+'">'+subLabel+'</td>';
-      var total = 0;
-      for (var i=0; i<data.length; i++) {
-        var v = key2 ? data[i][key1]+data[i][key2] : data[i][key1];
-        total += v;
-        h += '<td style="'+td+'">'+v+'</td>';
+    var ncol = days + 3; // 区分, 小項目, 日..., 合計
+    var lastCol = xlsxColLetter(ncol - 1);
+    var sheet = {name:'総務課提出用', rows:[], merges:[], cols:[]};
+    sheet.cols.push(5); sheet.cols.push(6);
+    for (var d=0; d<days; d++) sheet.cols.push(4.5);
+    sheet.cols.push(7);
+    // タイトル
+    var r1 = [XC('職員食実施食数表', 12)];
+    for (var c=1; c<ncol; c++) r1.push(XC('', 12));
+    sheet.rows.push(r1);
+    sheet.merges.push('A1:'+lastCol+'1');
+    // 年月
+    sheet.rows.push([XC(y+'年'+m+'月', 0)]);
+    // 見出し
+    var hdr = [XC('', 1), XC('', 1)];
+    for (var d=1; d<=days; d++) hdr.push(XC(d, dayFillStyle(y,m,d,true)));
+    hdr.push(XC('合計', 1));
+    sheet.rows.push(hdr);
+    function pushBlock(label, subs) {
+      var startRow = sheet.rows.length + 1;
+      for (var si=0; si<subs.length; si++) {
+        var sr = subs[si];
+        var row = [ si===0 ? XC(label,3) : XC('',3), XC(sr.name, sr.bold?3:2) ];
+        var total = 0;
+        for (var d=0; d<days; d++) { var v = sr.vals[d]; total += v; row.push(XC(v, sr.bold?3:2)); }
+        row.push(XC(total, 3));
+        sheet.rows.push(row);
       }
-      h += '<td style="'+tdL+'">'+total+'</td></tr>';
-      return h;
+      var endRow = sheet.rows.length;
+      if (subs.length > 1) sheet.merges.push('A'+startRow+':A'+endRow);
     }
-    html += rowHtml('朝', 3, '医局', 'bDoc');
-    html += rowHtml(null, 0, '一般', 'bGen');
-    html += rowHtml(null, 0, '合計', 'bDoc', 'bGen');
-    html += rowHtml('昼', 3, '医局', 'lDoc');
-    html += rowHtml(null, 0, '一般', 'lGen');
-    html += rowHtml(null, 0, '合計', 'lDoc', 'lGen');
-    html += rowHtml('夕', 3, '医局', 'dDoc');
-    html += rowHtml(null, 0, '一般', 'dGen');
-    html += rowHtml(null, 0, '合計', 'dDoc', 'dGen');
-    html += '</table>';
-    downloadXls(xlsWrap('総務課提出用', html), '職員食実施食数表(総務課提出用)_'+y+'年'+pad(m)+'月.xls');
+    function col(key) { return data.map(function(r){ return r[key]; }); }
+    function add(a, b) { return a.map(function(v,i){ return v + b[i]; }); }
+    var bDoc=col('bDoc'), bGen=col('bGen'), lDoc=col('lDoc'), lGen=col('lGen'), dDoc=col('dDoc'), dGen=col('dGen');
+    var kb=col('kb'), kl=col('kl'), kd=col('kd');
+    pushBlock('朝', [ {name:'医局',vals:bDoc}, {name:'一般',vals:bGen}, {name:'合計',vals:add(bDoc,bGen),bold:true} ]);
+    pushBlock('昼', [ {name:'医局',vals:lDoc}, {name:'一般',vals:lGen}, {name:'合計',vals:add(lDoc,lGen),bold:true} ]);
+    pushBlock('夕', [ {name:'医局',vals:dDoc}, {name:'一般',vals:dGen}, {name:'合計',vals:add(dDoc,dGen),bold:true} ]);
+    pushBlock('検査食', [ {name:'朝',vals:kb}, {name:'昼',vals:kl}, {name:'夕',vals:kd}, {name:'合計',vals:add(add(kb,kl),kd),bold:true} ]);
+    // 日計
+    var dailyTotal = data.map(function(r){ return (r.bDoc+r.bGen)+(r.lDoc+r.lGen)+(r.dDoc+r.dGen)+(r.kb+r.kl+r.kd); });
+    var dtRowNum = sheet.rows.length + 1;
+    var dtRow = [ XC('日計', 3), XC('', 3) ];
+    var grand = 0;
+    for (var d=0; d<days; d++) { grand += dailyTotal[d]; dtRow.push(XC(dailyTotal[d], 3)); }
+    dtRow.push(XC(grand, 3));
+    sheet.rows.push(dtRow);
+    sheet.merges.push('A'+dtRowNum+':B'+dtRowNum);
+    downloadXlsx(sheet, '職員食実施食数表(総務課提出用)_'+y+'年'+pad(m)+'月.xlsx');
     showToast('総務課提出用Excelを出力しました');
   });
 }
@@ -1083,44 +1246,41 @@ function exportEiyouExcel() {
     var m = parseInt(document.getElementById('rpt-month').value);
     var data = buildMealCountData(y, m);
     var days = data.length;
-    var th = 'border:1px solid #000;padding:3px 8px;text-align:center;font-weight:bold;background:#f0f0f0;';
-    var td = 'border:1px solid #000;padding:3px 8px;text-align:center;';
-    var gap = 'border:none;padding:0 6px;';
-    var html = '<table style="border-collapse:collapse;font-size:11px">';
-    html += '<tr><td colspan="11" style="font-size:16px;font-weight:bold;text-align:center;padding:8px;border:none">'+y+'年　'+m+'月　　職員食食数表</td></tr>';
-    html += '<tr>';
-    html += '<td style="'+th+'">日</td><td style="'+th+'">朝</td><td style="'+th+'">昼</td><td style="'+th+'">夕</td><td style="'+th+'">医局</td>';
-    html += '<td style="'+gap+'"></td>';
-    html += '<td style="'+th+'">日</td><td style="'+th+'">朝</td><td style="'+th+'">昼</td><td style="'+th+'">夕</td><td style="'+th+'">医局</td>';
-    html += '</tr>';
-    var rows = Math.max(15, days - 15);
-    for (var i=0; i<rows; i++) {
+    var sheet = {name:'栄養科掲示用', rows:[], merges:[], cols:[]};
+    sheet.cols = [5,5,5,5,2,5,5,5,5];
+    // 各日: 朝=朝食+検査朝, 昼=昼食+検査昼, 夕=夕食+夕食医師+検査夕
+    function mB(r){ return r.bDoc+r.bGen+r.kb; }
+    function mL(r){ return r.lDoc+r.lGen+r.kl; }
+    function mD(r){ return r.dDoc+r.dGen+r.kd; }
+    // タイトル (9列結合)
+    var r1 = [XC(y+'年　'+m+'月　　職員食食数表', 12)];
+    for (var c=1; c<9; c++) r1.push(XC('', 12));
+    sheet.rows.push(r1);
+    sheet.merges.push('A1:I1');
+    // 見出し
+    sheet.rows.push([XC('日',1),XC('朝',1),XC('昼',1),XC('夕',1),XC('',0),XC('日',1),XC('朝',1),XC('昼',1),XC('夕',1)]);
+    var nrows = Math.max(15, days - 15);
+    for (var i=0; i<nrows; i++) {
       var left = (i < 15) ? data[i] : null;
       var right = (15+i < days) ? data[15+i] : null;
-      html += '<tr>';
-      if (left) {
-        html += '<td style="'+td+'">'+left.day+'</td>';
-        html += '<td style="'+td+'">'+(left.bDoc+left.bGen)+'</td>';
-        html += '<td style="'+td+'">'+(left.lDoc+left.lGen+1)+'</td>';
-        html += '<td style="'+td+'">'+(left.dDoc+left.dGen)+'</td>';
-        html += '<td style="'+td+'">'+left.dDoc+'</td>';
-      } else {
-        html += '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td>';
-      }
-      html += '<td style="'+gap+'"></td>';
-      if (right) {
-        html += '<td style="'+td+'">'+right.day+'</td>';
-        html += '<td style="'+td+'">'+(right.bDoc+right.bGen)+'</td>';
-        html += '<td style="'+td+'">'+(right.lDoc+right.lGen+1)+'</td>';
-        html += '<td style="'+td+'">'+(right.dDoc+right.dGen)+'</td>';
-        html += '<td style="'+td+'">'+right.dDoc+'</td>';
-      } else {
-        html += '<td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td><td style="'+td+'"></td>';
-      }
-      html += '</tr>';
+      var row = [];
+      if (left) { row.push(XC(left.day,2), XC(mB(left),2), XC(mL(left),2), XC(mD(left),2)); }
+      else { row.push(XC('',2),XC('',2),XC('',2),XC('',2)); }
+      row.push(XC('',0));
+      if (right) { row.push(XC(right.day,2), XC(mB(right),2), XC(mL(right),2), XC(mD(right),2)); }
+      else { row.push(XC('',2),XC('',2),XC('',2),XC('',2)); }
+      sheet.rows.push(row);
     }
-    html += '</table>';
-    downloadXls(xlsWrap('栄養科掲示用', html), '職員食食数表(栄養科掲示用)_'+y+'年'+pad(m)+'月.xls');
+    // 月合計
+    var totB=0, totL=0, totD=0;
+    for (var i=0; i<days; i++) { totB += mB(data[i]); totL += mL(data[i]); totD += mD(data[i]); }
+    sheet.rows.push([]);
+    sheet.rows.push([XC('区分',1), XC('月合計',1)]);
+    sheet.rows.push([XC('朝',4), XC(totB,2)]);
+    sheet.rows.push([XC('昼',4), XC(totL,2)]);
+    sheet.rows.push([XC('夕',4), XC(totD,2)]);
+    sheet.rows.push([XC('総合計',3), XC(totB+totL+totD,3)]);
+    downloadXlsx(sheet, '職員食食数表(栄養科掲示用)_'+y+'年'+pad(m)+'月.xlsx');
     showToast('栄養科掲示用Excelを出力しました');
   });
 }
@@ -1268,69 +1428,49 @@ function exportKensaExcel() {
   var y = parseInt(document.getElementById('kensa-year').value);
   var m = parseInt(document.getElementById('kensa-month').value);
   var days = daysInMonth(y, m);
-  var sat = 'background:#e8eaf6;';
-  var sun = 'background:#fce4ec;';
-  var hol = 'background:#fff8e1;';
-  var th = 'border:1px solid #000;padding:3px 8px;text-align:center;font-weight:bold;background:#f0f0f0;';
-  var td = 'border:1px solid #000;padding:3px 8px;text-align:center;';
-  var tdL = 'border:1px solid #000;padding:3px 8px;text-align:left;';
   function doctorName(sid) {
     if (!sid) return '';
     var s = getStaffById(sid);
     return s ? s.name : sid;
   }
-  var html = '<table border="1" style="border-collapse:collapse;font-size:11px">';
-  html += '<tr><td colspan="6" style="font-size:16px;font-weight:bold;text-align:center;padding:8px;border:none">'+y+'年　'+m+'月　　検査食割り当て表</td></tr>';
-  html += '<tr>';
-  html += '<td style="'+th+'">日</td><td style="'+th+'">曜日</td>';
-  html += '<td style="'+th+'">検査朝</td><td style="'+th+'">検査昼</td><td style="'+th+'">検査夕</td>';
-  html += '<td style="'+th+'">備考</td>';
-  html += '</tr>';
+  var sheet = {name:'検査食割り当て', rows:[], merges:[], cols:[6,6,12,12,12,14]};
+  // タイトル
+  var r1 = [XC(y+'年　'+m+'月　　検査食割り当て表', 12), XC('',12), XC('',12), XC('',12), XC('',12), XC('',12)];
+  sheet.rows.push(r1);
+  sheet.merges.push('A1:F1');
+  sheet.rows.push([XC('日',1),XC('曜日',1),XC('検査朝',1),XC('検査昼',1),XC('検査夕',1),XC('備考',1)]);
   for (var d=1; d<=days; d++) {
-    var dow = dayOfWeek(y,m,d);
-    var ds = y+'-'+pad(m)+'-'+pad(d);
-    var hName = getHolidayName(ds);
-    var bg = '';
-    if (hName) bg = hol; else if (dow===0) bg = sun; else if (dow===6) bg = sat;
-    html += '<tr>';
-    html += '<td style="'+td+bg+'">'+d+'</td>';
-    html += '<td style="'+td+bg+'">'+WEEKDAYS[dow]+'</td>';
-    html += '<td style="'+td+bg+'">'+esc(doctorName(getKensaAssign(y, m, d, 'b')))+'</td>';
-    html += '<td style="'+td+bg+'">'+esc(doctorName(getKensaAssign(y, m, d, 'l')))+'</td>';
-    html += '<td style="'+td+bg+'">'+esc(doctorName(getKensaAssign(y, m, d, 'd')))+'</td>';
-    html += '<td style="'+tdL+bg+'">'+esc(hName||'')+'</td>';
-    html += '</tr>';
+    var st = dayFillStyle(y, m, d, false);
+    var hName = getHolidayName(y+'-'+pad(m)+'-'+pad(d));
+    sheet.rows.push([
+      XC(d, st), XC(WEEKDAYS[dayOfWeek(y,m,d)], st),
+      XC(doctorName(getKensaAssign(y,m,d,'b')), st),
+      XC(doctorName(getKensaAssign(y,m,d,'l')), st),
+      XC(doctorName(getKensaAssign(y,m,d,'d')), st),
+      XC(hName||'', st===2?4:st)
+    ]);
   }
-  html += '</table>';
-  html += '<br>';
-  html += '<table border="1" style="border-collapse:collapse;font-size:11px">';
-  html += '<tr><td colspan="7" style="font-weight:bold;padding:4px;border:none">医師別 検査食集計</td></tr>';
-  html += '<tr>';
-  html += '<td style="'+th+'">職員ID</td><td style="'+th+'">氏名</td><td style="'+th+'">部署</td>';
-  html += '<td style="'+th+'">検査朝</td><td style="'+th+'">検査昼</td><td style="'+th+'">検査夕</td><td style="'+th+'">合計</td>';
-  html += '</tr>';
+  // 空行 + 医師別集計
+  sheet.rows.push([]);
+  var titleRow = sheet.rows.length + 1;
+  sheet.rows.push([XC('医師別 検査食集計', 3), XC('',3), XC('',3), XC('',3), XC('',3), XC('',3), XC('',3)]);
+  sheet.merges.push('A'+titleRow+':G'+titleRow);
+  sheet.rows.push([XC('職員ID',1),XC('氏名',1),XC('部署',1),XC('検査朝',1),XC('検査昼',1),XC('検査夕',1),XC('合計',1)]);
   var stats = getKensaDoctorStats(y, m);
   var ids = Object.keys(stats).sort();
   var sumB=0, sumL=0, sumD=0;
   for (var i=0; i<ids.length; i++) {
-    var st = stats[ids[i]];
-    var s = getStaffById(ids[i]);
-    html += '<tr>';
-    html += '<td style="'+tdL+'">'+esc(ids[i])+'</td>';
-    html += '<td style="'+tdL+'">'+esc(s?s.name:'')+'</td>';
-    html += '<td style="'+tdL+'">'+esc(s?s.dept:'')+'</td>';
-    html += '<td style="'+td+'">'+st.b+'</td><td style="'+td+'">'+st.l+'</td><td style="'+td+'">'+st.d+'</td>';
-    html += '<td style="'+td+'font-weight:bold">'+(st.b+st.l+st.d)+'</td>';
-    html += '</tr>';
-    sumB+=st.b; sumL+=st.l; sumD+=st.d;
+    var s = getStaffById(ids[i]); var stt = stats[ids[i]];
+    sheet.rows.push([
+      XC(ids[i],4), XC(s?s.name:'',4), XC(s?s.dept:'',4),
+      XC(stt.b,2), XC(stt.l,2), XC(stt.d,2), XC(stt.b+stt.l+stt.d,3)
+    ]);
+    sumB+=stt.b; sumL+=stt.l; sumD+=stt.d;
   }
-  html += '<tr>';
-  html += '<td colspan="3" style="'+th+'">合計</td>';
-  html += '<td style="'+th+'">'+sumB+'</td><td style="'+th+'">'+sumL+'</td><td style="'+th+'">'+sumD+'</td>';
-  html += '<td style="'+th+'">'+(sumB+sumL+sumD)+'</td>';
-  html += '</tr>';
-  html += '</table>';
-  downloadXls(xlsWrap('検査食割り当て', html), '検査食割り当て表_'+y+'年'+pad(m)+'月.xls');
+  var totRow = sheet.rows.length + 1;
+  sheet.rows.push([XC('合計',1), XC('',1), XC('',1), XC(sumB,3), XC(sumL,3), XC(sumD,3), XC(sumB+sumL+sumD,3)]);
+  sheet.merges.push('A'+totRow+':C'+totRow);
+  downloadXlsx(sheet, '検査食割り当て表_'+y+'年'+pad(m)+'月.xlsx');
   showToast('検査食割り当て表Excelを出力しました');
 }
 
@@ -1458,102 +1598,74 @@ function exportDetailExcel() {
     showToast('注文データがありません');
     return;
   }
-  var sat = 'background:#e8eaf6;';
-  var sun = 'background:#fce4ec;';
-  var hol = 'background:#fff8e1;';
-  var th = 'border:1px solid #999;padding:2px 4px;text-align:center;font-weight:bold;background:#f0f0f0;';
-  var td = 'border:1px solid #999;padding:2px 4px;text-align:center;';
-  var tdL = 'border:1px solid #999;padding:2px 4px;text-align:left;';
-  var tdB = 'border:1px solid #999;padding:2px 4px;text-align:center;font-weight:bold;';
-  var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
-  html += '<head><meta charset="UTF-8">';
-  html += '<xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>';
-  html += '<x:Name>'+y+'年'+m+'月注文一覧</x:Name>';
-  html += '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>';
-  html += '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml>';
-  html += '</head><body>';
+  var ncol = 3 + days*4 + 4;
+  var lastCol = xlsxColLetter(ncol - 1);
+  var sheet = {name:xlsxSanitizeName(y+'年'+m+'月注文一覧'), rows:[], merges:[], cols:[]};
+  sheet.cols.push(6); sheet.cols.push(10); sheet.cols.push(10);
+  for (var c=0; c<days*4+4; c++) sheet.cols.push(3.5);
+  // 食事数合計ミニ表
   var mt = getMonthlyMealTotals(y, m);
   var mbSum = mt.b+mt.kb, mlSum = mt.l+mt.kl, mdSum = mt.d+mt.kd, mddSum = mt.dd;
   var mkSum = mt.kb+mt.kl+mt.kd;
   var mGrand = mbSum+mlSum+mdSum+mddSum;
-  html += '<table border="1" style="border-collapse:collapse;font-size:11px;margin-bottom:12px">';
-  html += '<tr><td colspan="4" style="'+tdB+'font-size:13px">'+y+'年'+m+'月 食事数合計（注文＋検査食）</td></tr>';
-  html += '<tr><td style="'+th+'">区分</td><td style="'+th+'">注文</td><td style="'+th+'">検査食</td><td style="'+th+'">合計</td></tr>';
-  html += '<tr><td style="'+tdL+'">朝の合計</td><td style="'+td+'">'+mt.b+'</td><td style="'+td+'">'+mt.kb+'</td><td style="'+tdB+'">'+mbSum+'</td></tr>';
-  html += '<tr><td style="'+tdL+'">昼の合計</td><td style="'+td+'">'+mt.l+'</td><td style="'+td+'">'+mt.kl+'</td><td style="'+tdB+'">'+mlSum+'</td></tr>';
-  html += '<tr><td style="'+tdL+'">夕の合計</td><td style="'+td+'">'+mt.d+'</td><td style="'+td+'">'+mt.kd+'</td><td style="'+tdB+'">'+mdSum+'</td></tr>';
-  html += '<tr><td style="'+tdL+'">夕食医師の合計</td><td style="'+td+'">'+mt.dd+'</td><td style="'+td+'">0</td><td style="'+tdB+'">'+mddSum+'</td></tr>';
-  html += '<tr><td style="'+tdL+'">検査食の合計（内数）</td><td style="'+td+'">-</td><td style="'+td+'">'+mkSum+'</td><td style="'+tdB+'">'+mkSum+'</td></tr>';
-  html += '<tr><td style="'+tdB+'">食事総数</td><td style="'+tdB+'">'+(mt.b+mt.l+mt.d+mt.dd)+'</td><td style="'+tdB+'">'+mkSum+'</td><td style="'+tdB+'">'+mGrand+'</td></tr>';
-  html += '</table>';
-  html += '<table border="1" style="border-collapse:collapse;font-size:10px">';
-  html += '<tr><td colspan="'+(3+days*4+4)+'" style="font-size:14px;font-weight:bold;padding:6px">'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</td></tr>';
-  html += '<tr>';
-  html += '<td rowspan="2" style="'+th+'">ID</td>';
-  html += '<td rowspan="2" style="'+th+'">氏名</td>';
-  html += '<td rowspan="2" style="'+th+'">部署</td>';
+  var tRow = sheet.rows.length + 1;
+  sheet.rows.push([XC(y+'年'+m+'月 食事数合計（注文＋検査食）', 3), XC('',3), XC('',3), XC('',3)]);
+  sheet.merges.push('A'+tRow+':D'+tRow);
+  sheet.rows.push([XC('区分',1), XC('注文',1), XC('検査食',1), XC('合計',1)]);
+  sheet.rows.push([XC('朝の合計',4), XC(mt.b,2), XC(mt.kb,2), XC(mbSum,3)]);
+  sheet.rows.push([XC('昼の合計',4), XC(mt.l,2), XC(mt.kl,2), XC(mlSum,3)]);
+  sheet.rows.push([XC('夕の合計',4), XC(mt.d,2), XC(mt.kd,2), XC(mdSum,3)]);
+  sheet.rows.push([XC('夕食医師の合計',4), XC(mt.dd,2), XC(0,2), XC(mddSum,3)]);
+  sheet.rows.push([XC('検査食の合計（内数）',4), XC('-',2), XC(mkSum,2), XC(mkSum,3)]);
+  sheet.rows.push([XC('食事総数',3), XC(mt.b+mt.l+mt.d+mt.dd,3), XC(mkSum,3), XC(mGrand,3)]);
+  sheet.rows.push([]);
+  // 全注文者一覧
+  var titleRow = sheet.rows.length + 1;
+  var tr = [XC(y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）', 3)];
+  for (var c=1; c<ncol; c++) tr.push(XC('',3));
+  sheet.rows.push(tr);
+  sheet.merges.push('A'+titleRow+':'+lastCol+titleRow);
+  // 見出し1行目（日をcolspan4で結合）
+  var h1Row = sheet.rows.length + 1;
+  var h1 = [XC('ID',1), XC('氏名',1), XC('部署',1)];
   for (var d=1; d<=days; d++) {
-    var dow = dayOfWeek(y,m,d);
-    var bg = '';
-    if (dow===0) bg = sun;
-    else if (dow===6) bg = sat;
-    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
-    html += '<td colspan="4" style="'+th+bg+'">'+d+'日('+WEEKDAYS[dow]+')</td>';
+    var st = dayFillStyle(y,m,d,true);
+    h1.push(XC(d+'日('+WEEKDAYS[dayOfWeek(y,m,d)]+')', st));
+    h1.push(XC('',st)); h1.push(XC('',st)); h1.push(XC('',st));
   }
-  html += '<td colspan="4" style="'+th+'">合計</td>';
-  html += '</tr>';
-  html += '<tr>';
+  h1.push(XC('合計',1)); h1.push(XC('',1)); h1.push(XC('',1)); h1.push(XC('',1));
+  sheet.rows.push(h1);
+  // ID/氏名/部署 を2行結合、各日ブロックをcolspan4結合、合計をcolspan4結合
+  sheet.merges.push('A'+h1Row+':A'+(h1Row+1));
+  sheet.merges.push('B'+h1Row+':B'+(h1Row+1));
+  sheet.merges.push('C'+h1Row+':C'+(h1Row+1));
+  for (var d=0; d<days; d++) {
+    var c0 = 3 + d*4;
+    sheet.merges.push(xlsxColLetter(c0)+h1Row+':'+xlsxColLetter(c0+3)+h1Row);
+  }
+  var totC0 = 3 + days*4;
+  sheet.merges.push(xlsxColLetter(totC0)+h1Row+':'+xlsxColLetter(totC0+3)+h1Row);
+  // 見出し2行目 朝昼夕医
+  var h2 = [XC('',1), XC('',1), XC('',1)];
   for (var d=1; d<=days; d++) {
-    var dow = dayOfWeek(y,m,d);
-    var bg = '';
-    if (dow===0) bg = sun;
-    else if (dow===6) bg = sat;
-    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
-    html += '<td style="'+th+bg+'">朝</td>';
-    html += '<td style="'+th+bg+'">昼</td>';
-    html += '<td style="'+th+bg+'">夕</td>';
-    html += '<td style="'+th+bg+'">医</td>';
+    var st = dayFillStyle(y,m,d,true);
+    h2.push(XC('朝',st)); h2.push(XC('昼',st)); h2.push(XC('夕',st)); h2.push(XC('医',st));
   }
-  html += '<td style="'+th+'">朝</td>';
-  html += '<td style="'+th+'">昼</td>';
-  html += '<td style="'+th+'">夕</td>';
-  html += '<td style="'+th+'">医</td>';
-  html += '</tr>';
+  h2.push(XC('朝',1)); h2.push(XC('昼',1)); h2.push(XC('夕',1)); h2.push(XC('医',1));
+  sheet.rows.push(h2);
+  // データ
   for (var i=0; i<staffWithOrders.length; i++) {
-    var sw = staffWithOrders[i];
-    var s = sw.staff;
-    html += '<tr>';
-    html += '<td style="'+tdL+'">'+esc(s.id)+'</td>';
-    html += '<td style="'+tdL+'">'+esc(s.name)+'</td>';
-    html += '<td style="'+tdL+'">'+esc(s.dept)+'</td>';
+    var sw = staffWithOrders[i]; var s = sw.staff;
+    var row = [XC(s.id,4), XC(s.name,4), XC(s.dept,4)];
     for (var d=1; d<=days; d++) {
       var o = sw.perDay[d-1];
-      var dow = dayOfWeek(y,m,d);
-      var bg = '';
-      if (dow===0) bg = sun;
-      else if (dow===6) bg = sat;
-      else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = hol;
-      html += '<td style="'+td+bg+'">'+(o.b?'○':'')+'</td>';
-      html += '<td style="'+td+bg+'">'+(o.l?'○':'')+'</td>';
-      html += '<td style="'+td+bg+'">'+(o.d?'○':'')+'</td>';
-      html += '<td style="'+td+bg+'">'+(o.dd?'○':'')+'</td>';
+      var st = dayFillStyle(y,m,d,false);
+      row.push(XC(o.b?'○':'',st)); row.push(XC(o.l?'○':'',st)); row.push(XC(o.d?'○':'',st)); row.push(XC(o.dd?'○':'',st));
     }
-    html += '<td style="'+tdB+'">'+sw.totals.b+'</td>';
-    html += '<td style="'+tdB+'">'+sw.totals.l+'</td>';
-    html += '<td style="'+tdB+'">'+sw.totals.d+'</td>';
-    html += '<td style="'+tdB+'">'+sw.totals.dd+'</td>';
-    html += '</tr>';
+    row.push(XC(sw.totals.b,3)); row.push(XC(sw.totals.l,3)); row.push(XC(sw.totals.d,3)); row.push(XC(sw.totals.dd,3));
+    sheet.rows.push(row);
   }
-  html += '</table></body></html>';
-  var blob = new Blob(['﻿' + html], {type: 'application/vnd.ms-excel'});
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url;
-  a.download = '注文者一覧_'+y+'年'+pad(m)+'月.xls';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadXlsx(sheet, '注文者一覧_'+y+'年'+pad(m)+'月.xlsx');
   showToast('Excelファイルを出力しました');
 }
 
