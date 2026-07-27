@@ -219,7 +219,7 @@ function showTab(name) {
   var btn = document.querySelector('[data-tab="'+name+'"]');
   if (btn) btn.classList.add('active');
   if (name==='today') renderToday();
-  if (name==='staff') { renderStaffList(); populateChildStaff(); renderChildList(); }
+  if (name==='staff') { renderStaffList(); populateDeptSelect(); populateChildStaff(); renderChildList(); }
   if (name==='order') initOrderTab();
   if (name==='report') initReportTab();
   if (name==='history') renderHistory();
@@ -280,16 +280,16 @@ function renderTodayInner() {
   document.getElementById('tot-l-order').textContent = ordL;
   document.getElementById('tot-l-kensa').textContent = kl;
   document.getElementById('tot-l-sum').textContent = ordL + kl;
-  document.getElementById('tot-d-order').textContent = ordD;
+  document.getElementById('tot-d-order').textContent = ordD + ordDD;
   document.getElementById('tot-d-kensa').textContent = kd;
-  document.getElementById('tot-d-sum').textContent = ordD + kd;
+  document.getElementById('tot-d-sum').textContent = ordD + ordDD + kd;
   document.getElementById('tot-dd-order').textContent = ordDD;
   document.getElementById('tot-dd-sum').textContent = ordDD;
   document.getElementById('tot-k-kensa').textContent = kTot;
   document.getElementById('tot-k-sum').textContent = kTot;
   document.getElementById('tot-order-all').textContent = (ordB + ordL + ordD + ordDD);
   document.getElementById('tot-kensa-all').textContent = kTot;
-  document.getElementById('tot-grand').textContent = (ordB + kb) + (ordL + kl) + (ordD + kd) + ordDD;
+  document.getElementById('tot-grand').textContent = (ordB + kb) + (ordL + kl) + (ordD + ordDD + kd);
 }
 
 function getKensaAssign(y, m, d, meal) {
@@ -347,12 +347,68 @@ function renderStaffList() {
   tb.innerHTML = html;
 }
 
+function getAllDepts() {
+  var seen = {}, list = [];
+  for (var i=0; i<staffList.length; i++) {
+    var d = staffList[i].dept;
+    if (d && !seen[d]) { seen[d] = true; list.push(d); }
+  }
+  return list.sort();
+}
+
+function populateDeptSelect() {
+  var sel = document.getElementById('sf-dept-sel');
+  if (!sel) return;
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">-- 部署を選択 --</option>';
+  var depts = getAllDepts();
+  for (var i=0; i<depts.length; i++) {
+    var o = document.createElement('option');
+    o.value = depts[i]; o.textContent = depts[i];
+    sel.appendChild(o);
+  }
+  var on = document.createElement('option');
+  on.value = '__new__'; on.textContent = '＋ 新しい部署を入力';
+  sel.appendChild(on);
+  sel.value = cur;
+  if (sel.value !== cur) sel.value = '';
+  onDeptSelectChange();
+}
+
+function onDeptSelectChange() {
+  var sel = document.getElementById('sf-dept-sel');
+  var inp = document.getElementById('sf-dept');
+  if (!sel || !inp) return;
+  if (sel.value === '__new__') {
+    inp.style.display = '';
+  } else {
+    inp.style.display = 'none';
+    inp.value = '';
+  }
+}
+
+function getDeptInputValue() {
+  var sel = document.getElementById('sf-dept-sel');
+  if (sel && sel.value === '__new__') return document.getElementById('sf-dept').value.trim();
+  return sel ? sel.value.trim() : '';
+}
+
+function setDeptInputValue(dept) {
+  var sel = document.getElementById('sf-dept-sel');
+  var inp = document.getElementById('sf-dept');
+  populateDeptSelect();
+  sel.value = dept;
+  if (sel.value === dept) { inp.style.display = 'none'; inp.value = ''; }
+  else { sel.value = '__new__'; inp.style.display = ''; inp.value = dept; }
+}
+
 function submitStaff(e) {
   e.preventDefault();
   var id = document.getElementById('sf-id').value.trim();
   var name = document.getElementById('sf-name').value.trim();
-  var dept = document.getElementById('sf-dept').value.trim();
-  if (!id||!name||!dept) return;
+  var dept = getDeptInputValue();
+  if (!id||!name) return;
+  if (!dept) { showToast('部署を選択してください'); return; }
   if (editingStaffId) {
     var s = getStaffById(editingStaffId);
     if (s) { s.name=name; s.dept=dept; }
@@ -365,6 +421,7 @@ function submitStaff(e) {
     showToast('職員を登録しました');
   }
   document.getElementById('staff-form').reset();
+  populateDeptSelect();
   renderStaffList();
 }
 
@@ -375,7 +432,7 @@ function editStaff(id) {
   document.getElementById('sf-id').value = s.id;
   document.getElementById('sf-id').readOnly = true;
   document.getElementById('sf-name').value = s.name;
-  document.getElementById('sf-dept').value = s.dept;
+  setDeptInputValue(s.dept);
   document.getElementById('sf-submit').textContent = '更新';
   document.getElementById('sf-cancel').style.display = '';
   document.getElementById('staff-form-title').textContent = '職員編集';
@@ -388,6 +445,7 @@ function cancelEditStaff() {
   document.getElementById('sf-cancel').style.display = 'none';
   document.getElementById('staff-form-title').textContent = '職員登録';
   document.getElementById('staff-form').reset();
+  populateDeptSelect();
 }
 
 function deleteStaff(id) {
@@ -840,15 +898,16 @@ function runReportInner() {
     dailyData.push({day:d, dow:dayOfWeek(y,m,d), b:dayB, l:dayL, d:dayD, dd:dayDD, kb:dayKB, kl:dayKL, kd:dayKD});
   }
   var totalAll = totalB+totalL+totalD+totalDD+totalKB+totalKL+totalKD;
-  var bSum = totalB+totalKB, lSum = totalL+totalKL, dSum = totalD+totalKD, ddSum = totalDD;
+  var bSum = totalB+totalKB, lSum = totalL+totalKL, dSum = totalD+totalDD+totalKD;
   var kSum = totalKB+totalKL+totalKD;
-  var grand = bSum+lSum+dSum+ddSum;
+  var grand = bSum+lSum+dSum;
   var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 食事数合計（注文＋検査食）</h3>';
+  html += '<p class="help-text">総務課提出用・栄養科掲示用Excelと同じ区分です。夕は夕食医師を含みます。</p>';
   html += '<table class="rpt-table"><thead><tr><th>区分</th><th>注文</th><th>検査食</th><th>合計</th></tr></thead><tbody>';
   html += '<tr><td>朝の合計</td><td>'+totalB+'</td><td>'+totalKB+'</td><td>'+bSum+'</td></tr>';
   html += '<tr><td>昼の合計</td><td>'+totalL+'</td><td>'+totalKL+'</td><td>'+lSum+'</td></tr>';
-  html += '<tr><td>夕の合計</td><td>'+totalD+'</td><td>'+totalKD+'</td><td>'+dSum+'</td></tr>';
-  html += '<tr><td>夕食医師の合計</td><td>'+totalDD+'</td><td>0</td><td>'+ddSum+'</td></tr>';
+  html += '<tr><td>夕の合計（夕食医師含む）</td><td>'+(totalD+totalDD)+'</td><td>'+totalKD+'</td><td>'+dSum+'</td></tr>';
+  html += '<tr><td>　うち夕食医師</td><td>'+totalDD+'</td><td>-</td><td>'+totalDD+'</td></tr>';
   html += '<tr><td>検査食の合計（内数）</td><td>-</td><td>'+kSum+'</td><td>'+kSum+'</td></tr>';
   html += '</tbody><tfoot><tr><td>食事総数</td><td>'+(totalB+totalL+totalD+totalDD)+'</td><td>'+kSum+'</td><td>'+grand+'</td></tr></tfoot></table></div>';
   html += '<div class="rpt-section"><h3>'+y+'年'+m+'月 月次合計</h3>';
@@ -1018,9 +1077,11 @@ function xmlEsc(v) {
   return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function XC(v, s) { return {v: v, s: s || 0}; }
+function XF(formula, s) { return {f: formula, s: s || 0}; }
 function xlsxCellXml(rowNum, colIdx, cell) {
   var ref = xlsxColLetter(colIdx) + rowNum;
   var s = cell.s || 0;
+  if (cell.f) return '<c r="'+ref+'" s="'+s+'"><f>'+xmlEsc(cell.f)+'</f></c>';
   if (cell.v === '' || cell.v === null || cell.v === undefined) return '<c r="'+ref+'" s="'+s+'"/>';
   if (typeof cell.v === 'number') return '<c r="'+ref+'" s="'+s+'"><v>'+cell.v+'</v></c>';
   return '<c r="'+ref+'" s="'+s+'" t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(cell.v)+'</t></is></c>';
@@ -1222,10 +1283,9 @@ function exportSoumuExcel() {
     function add(a, b) { return a.map(function(v,i){ return v + b[i]; }); }
     var bDoc=col('bDoc'), bGen=col('bGen'), lDoc=col('lDoc'), lGen=col('lGen'), dDoc=col('dDoc'), dGen=col('dGen');
     var kb=col('kb'), kl=col('kl'), kd=col('kd');
-    pushBlock('朝', [ {name:'医局',vals:bDoc}, {name:'一般',vals:bGen}, {name:'合計',vals:add(bDoc,bGen),bold:true} ]);
-    pushBlock('昼', [ {name:'医局',vals:lDoc}, {name:'一般',vals:lGen}, {name:'合計',vals:add(lDoc,lGen),bold:true} ]);
-    pushBlock('夕', [ {name:'医局',vals:dDoc}, {name:'一般',vals:dGen}, {name:'合計',vals:add(dDoc,dGen),bold:true} ]);
-    pushBlock('検査食', [ {name:'朝',vals:kb}, {name:'昼',vals:kl}, {name:'夕',vals:kd}, {name:'合計',vals:add(add(kb,kl),kd),bold:true} ]);
+    pushBlock('朝', [ {name:'医局',vals:bDoc}, {name:'一般',vals:bGen}, {name:'検査食',vals:kb}, {name:'合計',vals:add(add(bDoc,bGen),kb),bold:true} ]);
+    pushBlock('昼', [ {name:'医局',vals:lDoc}, {name:'一般',vals:lGen}, {name:'検査食',vals:kl}, {name:'合計',vals:add(add(lDoc,lGen),kl),bold:true} ]);
+    pushBlock('夕', [ {name:'医局',vals:dDoc}, {name:'一般',vals:dGen}, {name:'検査食',vals:kd}, {name:'合計',vals:add(add(dDoc,dGen),kd),bold:true} ]);
     // 日計
     var dailyTotal = data.map(function(r){ return (r.bDoc+r.bGen)+(r.lDoc+r.lGen)+(r.dDoc+r.dGen)+(r.kb+r.kl+r.kd); });
     var dtRowNum = sheet.rows.length + 1;
@@ -1238,6 +1298,67 @@ function exportSoumuExcel() {
     downloadXlsx(sheet, '職員食実施食数表(総務課提出用)_'+y+'年'+pad(m)+'月.xlsx');
     showToast('総務課提出用Excelを出力しました');
   });
+}
+
+function exportChangeRequestExcel() {
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  var days = daysInMonth(y, m);
+  var DAY0 = 6;                       // G列(0-based6)から日付
+  var totalCol = DAY0 + days;         // 「計」列
+  var lastDayLetter = xlsxColLetter(DAY0 + days - 1);
+  var sheet = {name:'変更用紙 (月)', rows:[], merges:[], cols:[]};
+  sheet.cols = [2.5, 6, 5, 12, 8, 12];
+  for (var i=0; i<days; i++) sheet.cols.push(3.5);
+  sheet.cols.push(6);
+  function blank(n, style) { var a=[]; for (var i=0;i<n;i++) a.push(XC('', style||0)); return a; }
+  // 1行目: 空
+  sheet.rows.push([]);
+  // 2行目: タイトル / 宛先 / 年月
+  var r2 = blank(totalCol+1, 0);
+  r2[1] = XC('【食事変更依頼書】', 11);
+  r2[11] = XC('総務課　→　栄養科', 0);
+  r2[18] = XC(y+'年'+m, 3);
+  r2[20] = XC('月', 0);
+  sheet.rows.push(r2);
+  sheet.merges.push('S2:T2');
+  sheet.merges.push('U2:V2');
+  // 3-4行目: 注意書き
+  var r3 = blank(totalCol+1, 0); r3[1] = XC('※　変更の受付は「1週間前まで」となっております。', 0); sheet.rows.push(r3);
+  var r4 = blank(totalCol+1, 0); r4[1] = XC('※　追加したい場合は「+1」、キャンセルしたい場合は「-1」と記載ください。', 0); sheet.rows.push(r4);
+  // 5行目: 見出し
+  var r5 = blank(totalCol+1, 0);
+  r5[3] = XC('部署', 1); r5[4] = XC('ID', 1); r5[5] = XC('氏名', 1);
+  for (var d=1; d<=days; d++) r5[DAY0+d-1] = XC(d, dayFillStyle(y, m, d, true));
+  r5[totalCol] = XC('計', 1);
+  sheet.rows.push(r5);
+  // 6行目以降: 一般(昼4/夜2/朝2) → 診療部(昼4/夜2/朝2)
+  var groups = [
+    {name:'一般',   meals:[{n:'昼',c:4},{n:'夜',c:2},{n:'朝',c:2}]},
+    {name:'診療部', meals:[{n:'昼',c:4},{n:'夜',c:2},{n:'朝',c:2}]}
+  ];
+  for (var gi=0; gi<groups.length; gi++) {
+    var g = groups[gi];
+    var gStart = sheet.rows.length + 1;
+    for (var mi=0; mi<g.meals.length; mi++) {
+      var ml = g.meals[mi];
+      var mStart = sheet.rows.length + 1;
+      for (var k=0; k<ml.c; k++) {
+        var rowNum = sheet.rows.length + 1;
+        var row = blank(totalCol+1, 0);
+        row[1] = XC(k===0 && mi===0 ? g.name : '', 3);
+        row[2] = XC(k===0 ? ml.n : '', 3);
+        row[3] = XC('', 4); row[4] = XC('', 2); row[5] = XC('', 4);
+        for (var d=1; d<=days; d++) row[DAY0+d-1] = XC('', dayFillStyle(y, m, d, false));
+        row[totalCol] = XF('SUM(G'+rowNum+':'+lastDayLetter+rowNum+')', 3);
+        sheet.rows.push(row);
+      }
+      if (ml.c > 1) sheet.merges.push('C'+mStart+':C'+(sheet.rows.length));
+    }
+    sheet.merges.push('B'+gStart+':B'+(sheet.rows.length));
+  }
+  downloadXlsx(sheet, '食事変更依頼書_'+y+'年'+pad(m)+'月.xlsx');
+  showToast('食事変更依頼書を出力しました');
 }
 
 function exportEiyouExcel() {
@@ -1492,81 +1613,92 @@ function renderKensaSummary(y, m) {
   tb.innerHTML = html;
 }
 
+// 注文者一覧の列定義（注文4種＋検査食3種）
+var DETAIL_COLS = [
+  {k:'b', label:'朝'}, {k:'l', label:'昼'}, {k:'d', label:'夕'}, {k:'dd', label:'医'},
+  {k:'kb', label:'検朝'}, {k:'kl', label:'検昼'}, {k:'kd', label:'検夕'}
+];
+
+function buildDetailRows(y, m) {
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var out = [];
+  for (var i=0; i<sorted.length; i++) {
+    var s = sorted[i];
+    var has = false;
+    var totals = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
+    var perDay = [];
+    for (var d=1; d<=days; d++) {
+      var o = getOrder(s.id, y, m, d);
+      var cell = {
+        b: !!o.b, l: !!o.l, d: !!o.d, dd: !!o.dd,
+        kb: getKensaAssign(y,m,d,'b') === s.id,
+        kl: getKensaAssign(y,m,d,'l') === s.id,
+        kd: getKensaAssign(y,m,d,'d') === s.id
+      };
+      perDay.push(cell);
+      for (var c=0; c<DETAIL_COLS.length; c++) {
+        var key = DETAIL_COLS[c].k;
+        if (cell[key]) { totals[key]++; has = true; }
+      }
+    }
+    if (has) {
+      totals.all = totals.b+totals.l+totals.d+totals.dd+totals.kb+totals.kl+totals.kd;
+      out.push({staff:s, totals:totals, perDay:perDay});
+    }
+  }
+  return out;
+}
+
 function runDetailReport() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
-  var sorted = getStaffSorted();
-  var staffWithOrders = [];
-  for (var i=0; i<sorted.length; i++) {
-    var s = sorted[i];
-    var hasOrder = false;
-    var totals = {b:0,l:0,d:0,dd:0};
-    for (var d=1; d<=days; d++) {
-      var o = getOrder(s.id, y, m, d);
-      if (o.b) { totals.b++; hasOrder=true; }
-      if (o.l) { totals.l++; hasOrder=true; }
-      if (o.d) { totals.d++; hasOrder=true; }
-      if (o.dd) { totals.dd++; hasOrder=true; }
-    }
-    if (hasOrder) staffWithOrders.push({staff:s, totals:totals});
-  }
-  if (staffWithOrders.length === 0) {
+  var rows = buildDetailRows(y, m);
+  var NC = DETAIL_COLS.length;
+  if (rows.length === 0) {
     document.getElementById('rpt-result').innerHTML = '<p style="text-align:center;color:#999;padding:20px">注文データがありません</p>';
     return;
   }
-  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 全注文者一覧（'+staffWithOrders.length+'名）</h3>';
+  function dayBg(d) {
+    var dow = dayOfWeek(y,m,d);
+    if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) return 'background:#fff8e1;';
+    if (dow===0) return 'background:#fce4ec;';
+    if (dow===6) return 'background:#e8eaf6;';
+    return '';
+  }
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 全注文者一覧（'+rows.length+'名）</h3>';
+  html += '<p class="help-text">検朝・検昼・検夕は検査食の担当日です。合計は注文＋検査食の総数です。</p>';
   html += '<div style="overflow-x:auto"><table class="rpt-table rpt-detail-table"><thead><tr>';
   html += '<th rowspan="2">ID</th><th rowspan="2">氏名</th><th rowspan="2">部署</th>';
   for (var d=1; d<=days; d++) {
-    var dow = dayOfWeek(y,m,d);
-    html += '<th colspan="4" style="border-bottom:none;';
-    if (dow===0) html += 'background:#fce4ec;';
-    else if (dow===6) html += 'background:#e8eaf6;';
-    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) html += 'background:#fff8e1;';
-    html += '">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dow]+'</span></th>';
+    html += '<th colspan="'+NC+'" style="border-bottom:none;'+dayBg(d)+'">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dayOfWeek(y,m,d)]+'</span></th>';
   }
-  html += '<th colspan="4" style="border-bottom:none;">合計</th>';
+  html += '<th colspan="'+NC+'" style="border-bottom:none;">合計</th>';
+  html += '<th rowspan="2">総計</th>';
   html += '</tr><tr>';
   for (var d=1; d<=days; d++) {
-    var dow = dayOfWeek(y,m,d);
-    var bg = '';
-    if (dow===0) bg = 'background:#fce4ec;';
-    else if (dow===6) bg = 'background:#e8eaf6;';
-    else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = 'background:#fff8e1;';
-    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">朝</th>';
-    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">昼</th>';
-    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">夕</th>';
-    html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">医</th>';
+    var bg = dayBg(d);
+    for (var c=0; c<NC; c++) html += '<th style="font-size:0.65rem;padding:2px;'+bg+'">'+DETAIL_COLS[c].label+'</th>';
   }
-  html += '<th style="font-size:0.65rem;padding:2px;">朝</th>';
-  html += '<th style="font-size:0.65rem;padding:2px;">昼</th>';
-  html += '<th style="font-size:0.65rem;padding:2px;">夕</th>';
-  html += '<th style="font-size:0.65rem;padding:2px;">医</th>';
+  for (var c=0; c<NC; c++) html += '<th style="font-size:0.65rem;padding:2px;">'+DETAIL_COLS[c].label+'</th>';
   html += '</tr></thead><tbody>';
-  for (var i=0; i<staffWithOrders.length; i++) {
-    var sw = staffWithOrders[i];
-    var s = sw.staff;
+  for (var i=0; i<rows.length; i++) {
+    var sw = rows[i], s = sw.staff;
     html += '<tr>';
     html += '<td style="text-align:left;white-space:nowrap">'+esc(s.id)+'</td>';
     html += '<td style="text-align:left;white-space:nowrap">'+esc(s.name)+'</td>';
     html += '<td style="text-align:left;white-space:nowrap">'+esc(s.dept)+'</td>';
     for (var d=1; d<=days; d++) {
-      var o = getOrder(s.id, y, m, d);
-      var dow = dayOfWeek(y,m,d);
-      var bg = '';
-      if (dow===0) bg = 'background:#fce4ec;';
-      else if (dow===6) bg = 'background:#e8eaf6;';
-      else if (getHolidayName(y+'-'+pad(m)+'-'+pad(d))) bg = 'background:#fff8e1;';
-      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.b?'○':'')+'</td>';
-      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.l?'○':'')+'</td>';
-      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.d?'○':'')+'</td>';
-      html += '<td style="text-align:center;padding:2px;'+bg+'">'+(o.dd?'○':'')+'</td>';
+      var cell = sw.perDay[d-1], bg = dayBg(d);
+      for (var c=0; c<NC; c++) {
+        html += '<td style="text-align:center;padding:2px;'+bg+'">'+(cell[DETAIL_COLS[c].k]?'○':'')+'</td>';
+      }
     }
-    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.b+'</td>';
-    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.l+'</td>';
-    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.d+'</td>';
-    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.dd+'</td>';
+    for (var c=0; c<NC; c++) {
+      html += '<td style="text-align:center;font-weight:bold">'+sw.totals[DETAIL_COLS[c].k]+'</td>';
+    }
+    html += '<td style="text-align:center;font-weight:bold">'+sw.totals.all+'</td>';
     html += '</tr>';
   }
   html += '</tbody></table></div></div>';
@@ -1577,45 +1709,30 @@ function exportDetailExcel() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
-  var sorted = getStaffSorted();
-  var staffWithOrders = [];
-  for (var i=0; i<sorted.length; i++) {
-    var s = sorted[i];
-    var hasOrder = false;
-    var totals = {b:0,l:0,d:0,dd:0};
-    var perDay = [];
-    for (var d=1; d<=days; d++) {
-      var o = getOrder(s.id, y, m, d);
-      perDay.push(o);
-      if (o.b) { totals.b++; hasOrder=true; }
-      if (o.l) { totals.l++; hasOrder=true; }
-      if (o.d) { totals.d++; hasOrder=true; }
-      if (o.dd) { totals.dd++; hasOrder=true; }
-    }
-    if (hasOrder) staffWithOrders.push({staff:s, totals:totals, perDay:perDay});
-  }
+  var staffWithOrders = buildDetailRows(y, m);
+  var NC = DETAIL_COLS.length;
   if (staffWithOrders.length === 0) {
     showToast('注文データがありません');
     return;
   }
-  var ncol = 3 + days*4 + 4;
+  var ncol = 3 + days*NC + NC + 1;
   var lastCol = xlsxColLetter(ncol - 1);
   var sheet = {name:xlsxSanitizeName(y+'年'+m+'月注文一覧'), rows:[], merges:[], cols:[]};
   sheet.cols.push(6); sheet.cols.push(10); sheet.cols.push(10);
-  for (var c=0; c<days*4+4; c++) sheet.cols.push(3.5);
+  for (var c=0; c<days*NC + NC + 1; c++) sheet.cols.push(3.5);
   // 食事数合計ミニ表
   var mt = getMonthlyMealTotals(y, m);
-  var mbSum = mt.b+mt.kb, mlSum = mt.l+mt.kl, mdSum = mt.d+mt.kd, mddSum = mt.dd;
+  var mbSum = mt.b+mt.kb, mlSum = mt.l+mt.kl, mdSum = mt.d+mt.dd+mt.kd;
   var mkSum = mt.kb+mt.kl+mt.kd;
-  var mGrand = mbSum+mlSum+mdSum+mddSum;
+  var mGrand = mbSum+mlSum+mdSum;
   var tRow = sheet.rows.length + 1;
   sheet.rows.push([XC(y+'年'+m+'月 食事数合計（注文＋検査食）', 3), XC('',3), XC('',3), XC('',3)]);
   sheet.merges.push('A'+tRow+':D'+tRow);
   sheet.rows.push([XC('区分',1), XC('注文',1), XC('検査食',1), XC('合計',1)]);
   sheet.rows.push([XC('朝の合計',4), XC(mt.b,2), XC(mt.kb,2), XC(mbSum,3)]);
   sheet.rows.push([XC('昼の合計',4), XC(mt.l,2), XC(mt.kl,2), XC(mlSum,3)]);
-  sheet.rows.push([XC('夕の合計',4), XC(mt.d,2), XC(mt.kd,2), XC(mdSum,3)]);
-  sheet.rows.push([XC('夕食医師の合計',4), XC(mt.dd,2), XC(0,2), XC(mddSum,3)]);
+  sheet.rows.push([XC('夕の合計（夕食医師含む）',4), XC(mt.d+mt.dd,2), XC(mt.kd,2), XC(mdSum,3)]);
+  sheet.rows.push([XC('　うち夕食医師',4), XC(mt.dd,2), XC('-',2), XC(mt.dd,3)]);
   sheet.rows.push([XC('検査食の合計（内数）',4), XC('-',2), XC(mkSum,2), XC(mkSum,3)]);
   sheet.rows.push([XC('食事総数',3), XC(mt.b+mt.l+mt.d+mt.dd,3), XC(mkSum,3), XC(mGrand,3)]);
   sheet.rows.push([]);
@@ -1625,44 +1742,49 @@ function exportDetailExcel() {
   for (var c=1; c<ncol; c++) tr.push(XC('',3));
   sheet.rows.push(tr);
   sheet.merges.push('A'+titleRow+':'+lastCol+titleRow);
-  // 見出し1行目（日をcolspan4で結合）
+  // 見出し1行目（各日を検査食含む NC 列で結合）
   var h1Row = sheet.rows.length + 1;
   var h1 = [XC('ID',1), XC('氏名',1), XC('部署',1)];
   for (var d=1; d<=days; d++) {
     var st = dayFillStyle(y,m,d,true);
     h1.push(XC(d+'日('+WEEKDAYS[dayOfWeek(y,m,d)]+')', st));
-    h1.push(XC('',st)); h1.push(XC('',st)); h1.push(XC('',st));
+    for (var c=1; c<NC; c++) h1.push(XC('',st));
   }
-  h1.push(XC('合計',1)); h1.push(XC('',1)); h1.push(XC('',1)); h1.push(XC('',1));
+  h1.push(XC('合計',1));
+  for (var c=1; c<NC; c++) h1.push(XC('',1));
+  h1.push(XC('総計',1));
   sheet.rows.push(h1);
-  // ID/氏名/部署 を2行結合、各日ブロックをcolspan4結合、合計をcolspan4結合
+  // ID/氏名/部署/総計 を2行結合、各日ブロックと合計ブロックを横結合
   sheet.merges.push('A'+h1Row+':A'+(h1Row+1));
   sheet.merges.push('B'+h1Row+':B'+(h1Row+1));
   sheet.merges.push('C'+h1Row+':C'+(h1Row+1));
   for (var d=0; d<days; d++) {
-    var c0 = 3 + d*4;
-    sheet.merges.push(xlsxColLetter(c0)+h1Row+':'+xlsxColLetter(c0+3)+h1Row);
+    var c0 = 3 + d*NC;
+    sheet.merges.push(xlsxColLetter(c0)+h1Row+':'+xlsxColLetter(c0+NC-1)+h1Row);
   }
-  var totC0 = 3 + days*4;
-  sheet.merges.push(xlsxColLetter(totC0)+h1Row+':'+xlsxColLetter(totC0+3)+h1Row);
-  // 見出し2行目 朝昼夕医
+  var totC0 = 3 + days*NC;
+  sheet.merges.push(xlsxColLetter(totC0)+h1Row+':'+xlsxColLetter(totC0+NC-1)+h1Row);
+  sheet.merges.push(xlsxColLetter(totC0+NC)+h1Row+':'+xlsxColLetter(totC0+NC)+(h1Row+1));
+  // 見出し2行目 朝昼夕医検朝検昼検夕
   var h2 = [XC('',1), XC('',1), XC('',1)];
   for (var d=1; d<=days; d++) {
     var st = dayFillStyle(y,m,d,true);
-    h2.push(XC('朝',st)); h2.push(XC('昼',st)); h2.push(XC('夕',st)); h2.push(XC('医',st));
+    for (var c=0; c<NC; c++) h2.push(XC(DETAIL_COLS[c].label, st));
   }
-  h2.push(XC('朝',1)); h2.push(XC('昼',1)); h2.push(XC('夕',1)); h2.push(XC('医',1));
+  for (var c=0; c<NC; c++) h2.push(XC(DETAIL_COLS[c].label, 1));
+  h2.push(XC('',1));
   sheet.rows.push(h2);
   // データ
   for (var i=0; i<staffWithOrders.length; i++) {
     var sw = staffWithOrders[i]; var s = sw.staff;
     var row = [XC(s.id,4), XC(s.name,4), XC(s.dept,4)];
     for (var d=1; d<=days; d++) {
-      var o = sw.perDay[d-1];
+      var cell = sw.perDay[d-1];
       var st = dayFillStyle(y,m,d,false);
-      row.push(XC(o.b?'○':'',st)); row.push(XC(o.l?'○':'',st)); row.push(XC(o.d?'○':'',st)); row.push(XC(o.dd?'○':'',st));
+      for (var c=0; c<NC; c++) row.push(XC(cell[DETAIL_COLS[c].k]?'○':'', st));
     }
-    row.push(XC(sw.totals.b,3)); row.push(XC(sw.totals.l,3)); row.push(XC(sw.totals.d,3)); row.push(XC(sw.totals.dd,3));
+    for (var c=0; c<NC; c++) row.push(XC(sw.totals[DETAIL_COLS[c].k], 3));
+    row.push(XC(sw.totals.all, 3));
     sheet.rows.push(row);
   }
   downloadXlsx(sheet, '注文者一覧_'+y+'年'+pad(m)+'月.xlsx');
@@ -1675,31 +1797,25 @@ function exportReportCSV() {
   var days = daysInMonth(y, m);
   var sorted = getStaffSorted();
   var mt = getMonthlyMealTotals(y, m);
-  var bSum = mt.b+mt.kb, lSum = mt.l+mt.kl, dSum = mt.d+mt.kd, ddSum = mt.dd;
+  var bSum = mt.b+mt.kb, lSum = mt.l+mt.kl, dSum = mt.d+mt.dd+mt.kd;
   var kSum = mt.kb+mt.kl+mt.kd;
-  var grand = bSum+lSum+dSum+ddSum;
+  var grand = bSum+lSum+dSum;
   var csv = '﻿'+y+'年'+m+'月 食事数合計（注文＋検査食）\n';
   csv += '区分,注文,検査食,合計\n';
   csv += '朝の合計,'+mt.b+','+mt.kb+','+bSum+'\n';
   csv += '昼の合計,'+mt.l+','+mt.kl+','+lSum+'\n';
-  csv += '夕の合計,'+mt.d+','+mt.kd+','+dSum+'\n';
-  csv += '夕食医師の合計,'+mt.dd+',0,'+ddSum+'\n';
+  csv += '夕の合計（夕食医師含む）,'+(mt.d+mt.dd)+','+mt.kd+','+dSum+'\n';
+  csv += 'うち夕食医師,'+mt.dd+',-,'+mt.dd+'\n';
   csv += '検査食の合計（内数）,-,'+kSum+','+kSum+'\n';
   csv += '食事総数,'+(mt.b+mt.l+mt.d+mt.dd)+','+kSum+','+grand+'\n';
   csv += '\n';
-  csv += '職員別 注文集計\n';
-  csv += '職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,合計\n';
-  for (var i=0; i<sorted.length; i++) {
-    var s = sorted[i];
-    var t = {b:0,l:0,d:0,dd:0};
-    for (var d=1; d<=days; d++) {
-      var o = getOrder(s.id, y, m, d);
-      if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
-    }
-    var total = t.b + t.l + t.d + t.dd;
-    if (total === 0) continue;
+  csv += '職員別 注文集計（検査食含む）\n';
+  csv += '職員ID,氏名,部署,朝食,昼食,夕食,夕食医師,検査朝,検査昼,検査夕,合計\n';
+  var detail = buildDetailRows(y, m);
+  for (var i=0; i<detail.length; i++) {
+    var s = detail[i].staff, t = detail[i].totals;
     csv += '"'+s.id.replace(/"/g,'""')+'","'+s.name.replace(/"/g,'""')+'","'+s.dept.replace(/"/g,'""')+'",';
-    csv += t.b+','+t.l+','+t.d+','+t.dd+','+total+'\n';
+    csv += t.b+','+t.l+','+t.d+','+t.dd+','+t.kb+','+t.kl+','+t.kd+','+t.all+'\n';
   }
   downloadFile(csv, '月間注文集計_'+y+'年'+pad(m)+'月.csv', 'text/csv;charset=utf-8');
   showToast('CSVを出力しました');
@@ -2020,6 +2136,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('staff-form').addEventListener('submit', submitStaff);
     document.getElementById('sf-cancel').addEventListener('click', cancelEditStaff);
+    document.getElementById('sf-dept-sel').addEventListener('change', onDeptSelectChange);
     document.getElementById('staff-search').addEventListener('input', renderStaffList);
     document.getElementById('csv-import').addEventListener('click', importCSV);
     document.getElementById('csv-export').addEventListener('click', exportCSV);
@@ -2039,6 +2156,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('bulk-weekday-dd').addEventListener('click', function(){bulkSetWeekday('dd');});
     document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
     document.getElementById('bulk-clear').addEventListener('click', bulkClear);
+    document.getElementById('order-change-req').addEventListener('click', exportChangeRequestExcel);
     document.getElementById('order-confirm').addEventListener('click', confirmOrder);
     document.getElementById('order-edit').addEventListener('click', editOrder);
 

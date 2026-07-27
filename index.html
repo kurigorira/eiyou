@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>職員給食注文管理システム</title>
-<link rel="stylesheet" href="style.css?v=20260720">
+<link rel="stylesheet" href="style.css?v=20260721">
 </head>
 <body>
 <div id="app">
@@ -75,8 +75,8 @@
           <tbody>
             <tr><td>朝の合計</td><td id="tot-b-order">0</td><td id="tot-b-kensa">0</td><td id="tot-b-sum">0</td></tr>
             <tr><td>昼の合計</td><td id="tot-l-order">0</td><td id="tot-l-kensa">0</td><td id="tot-l-sum">0</td></tr>
-            <tr><td>夕の合計</td><td id="tot-d-order">0</td><td id="tot-d-kensa">0</td><td id="tot-d-sum">0</td></tr>
-            <tr><td>夕食医師の合計</td><td id="tot-dd-order">0</td><td>0</td><td id="tot-dd-sum">0</td></tr>
+            <tr><td>夕の合計（夕食医師含む）</td><td id="tot-d-order">0</td><td id="tot-d-kensa">0</td><td id="tot-d-sum">0</td></tr>
+            <tr><td>　うち夕食医師</td><td id="tot-dd-order">0</td><td>-</td><td id="tot-dd-sum">0</td></tr>
             <tr><td>検査食の合計（内数）</td><td>-</td><td id="tot-k-kensa">0</td><td id="tot-k-sum">0</td></tr>
           </tbody>
           <tfoot><tr><td>食事総数</td><td id="tot-order-all">0</td><td id="tot-kensa-all">0</td><td id="tot-grand">0</td></tr></tfoot>
@@ -109,6 +109,10 @@
           <button class="btn btn-outline" id="bulk-weekday-dd">平日夕医師</button>
           <button class="btn btn-outline" id="bulk-copy-prev">前月コピー</button>
           <button class="btn btn-danger-outline" id="bulk-clear">全クリア</button>
+        </div>
+        <div class="control-row">
+          <button class="btn btn-outline" id="order-change-req">食事変更依頼書Excel</button>
+          <span class="help-text">確定後に変更が出た場合の依頼書（空欄の用紙）を出力します</span>
         </div>
       </div>
       <div id="order-grid-wrap">
@@ -153,7 +157,11 @@
         <form id="staff-form" class="inline-form">
           <input type="text" id="sf-id" placeholder="職員ID" required>
           <input type="text" id="sf-name" placeholder="氏名" required>
-          <input type="text" id="sf-dept" placeholder="部署" required>
+          <select id="sf-dept-sel">
+            <option value="">-- 部署を選択 --</option>
+            <option value="__new__">＋ 新しい部署を入力</option>
+          </select>
+          <input type="text" id="sf-dept" placeholder="新しい部署名" style="display:none">
           <button type="submit" class="btn" id="sf-submit">登録</button>
           <button type="button" class="btn btn-outline" id="sf-cancel" style="display:none">取消</button>
         </form>
@@ -314,6 +322,6 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="app.js?v=20260720"></script>
+<script src="app.js?v=20260721"></script>
 </body>
 </html>
