@@ -225,6 +225,16 @@ function showTab(name) {
   if (name==='history') renderHistory();
   if (name==='holiday') renderHolidayList();
   if (name==='kensa') initKensaTab();
+  if (name==='backup') initBackupTab();
+}
+
+function initBackupTab() {
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(sc) {
+    config = sc || {};
+  }).catch(function(){}).then(function() {
+    updatePwStatus();
+    renderLockStatus();
+  });
 }
 
 // ==================== TODAY TAB ====================
@@ -569,6 +579,9 @@ function renderOrderGrid() {
     orders = serverOrders || {};
     return fetch(API_URL + '?key=confirmed').then(function(r) { return r.json(); }).then(function(serverConfirmed) {
       confirmed = serverConfirmed || {};
+      return fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(sc) {
+        config = sc || {};
+      });
     });
   }).then(function() {
     renderOrderGridInner();
@@ -586,7 +599,8 @@ function renderOrderGridInner() {
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var cfm = getOrderStatus(staffId, y, m);
-  orderLocked = cfm;
+  renderOrderLockNotice();
+  orderLocked = cfm || isOrderInputBlocked();
   orderDirty = false;
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
@@ -630,6 +644,11 @@ function renderOrderGridInner() {
       var cm = parseInt(document.getElementById('order-month').value);
       var day = parseInt(this.getAttribute('data-d'));
       var meal = this.getAttribute('data-m');
+      if (isOrderInputBlocked()) {
+        this.checked = !this.checked;
+        showToast('現在、注文の受付を停止しています');
+        return;
+      }
       setOrder(sid, cy, cm, day, meal, this.checked);
       saveOrdersForStaff(sid, cy, cm);
       var act = this.checked ? '追加' : '取消';
@@ -669,6 +688,13 @@ function updateOrderButtons() {
     confirmBtn.textContent = '確定';
     editBtn.style.display = 'none';
   }
+  if (isOrderInputBlocked()) {
+    status.textContent = '受付停止中';
+    status.className = 'order-status unsaved';
+    setOrderControlsDisabled(true);
+  } else {
+    setOrderControlsDisabled(false);
+  }
 }
 
 function getOrderSummaryText(staffId, y, m) {
@@ -684,6 +710,7 @@ function getOrderSummaryText(staffId, y, m) {
 function confirmOrder() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) return;
+  if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var wasConfirmed = getOrderStatus(staffId, y, m);
@@ -704,6 +731,11 @@ function editOrder() {
   if (!staffId) return;
   fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(serverConfig) {
     config = serverConfig || {};
+    if (isOrderInputBlocked()) {
+      renderOrderLockNotice();
+      showToast('現在、注文の受付を停止しています');
+      return;
+    }
     var savedPw = getEditPassword();
     if (savedPw) {
       var input = prompt('編集パスワードを入力してください');
@@ -746,7 +778,77 @@ function updateOrderSummary(y, m, staffId) {
   document.getElementById('os-dd').textContent = totDD;
 }
 
+// ==================== ORDER LOCK (受付停止) ====================
+var DEFAULT_LOCK_MSG = '現在、注文の受付を停止しています。変更が必要な場合は栄養科までご連絡ください。';
+
+function isSystemLocked() {
+  return !!(config.lock && config.lock.on);
+}
+function isOrderInputBlocked() {
+  return isSystemLocked() && !adminMode;
+}
+function getLockMessage() {
+  return (config.lock && config.lock.msg) ? config.lock.msg : DEFAULT_LOCK_MSG;
+}
+function renderOrderLockNotice() {
+  var el = document.getElementById('order-lock-notice');
+  if (!el) return;
+  if (isSystemLocked()) {
+    el.textContent = adminMode
+      ? '【受付停止中】' + getLockMessage() + '（管理者モードのため編集できます）'
+      : '【受付停止中】' + getLockMessage();
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+function setOrderControlsDisabled(disabled) {
+  var ids = ['bulk-weekday-b','bulk-weekday-l','bulk-weekday-d','bulk-weekday-dd',
+             'bulk-copy-prev','bulk-clear','order-confirm','order-edit'];
+  for (var i=0; i<ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) el.disabled = disabled;
+  }
+}
+
+function renderLockStatus() {
+  var el = document.getElementById('lock-status');
+  if (!el) return;
+  if (isSystemLocked()) {
+    el.textContent = '現在ロック中です。表示メッセージ: ' + getLockMessage();
+  } else {
+    el.textContent = '現在ロックされていません（通常どおり注文できます）。';
+  }
+  var inp = document.getElementById('lock-msg');
+  if (inp && config.lock && config.lock.msg) inp.value = config.lock.msg;
+}
+
+function setOrderLock(on) {
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(sc) {
+    config = sc || {};
+    var msg = (document.getElementById('lock-msg').value || '').trim();
+    config.lock = {on: !!on, msg: msg};
+    return fetch(API_URL + '?key=config&action=merge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({lock: config.lock})
+    }).then(function(r) { return r.json(); });
+  }).then(function(res) {
+    if (!res || !res.ok) {
+      var em = res && res.error ? res.error : '不明なエラー';
+      alert('設定の保存に失敗しました: ' + em);
+      return;
+    }
+    renderLockStatus();
+    renderOrderLockNotice();
+    showToast(on ? '注文をロックしました' : 'ロックを解除しました');
+  }).catch(function(e) {
+    alert('設定の保存に失敗しました（通信エラー）: ' + e.message);
+  });
+}
+
 function requireUnlocked() {
+  if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return false; }
   if (orderLocked) { showToast('修正ボタンを押してから操作してください'); return false; }
   return true;
 }
@@ -2110,6 +2212,10 @@ function applyAdminMode() {
     btn.textContent = '管理者';
     btn.classList.remove('active-admin');
   }
+  renderOrderLockNotice();
+  if (document.getElementById('order-staff') && document.getElementById('order-staff').value) {
+    renderOrderGridInner();
+  }
 }
 
 // ==================== INITIALIZATION ====================
@@ -2199,6 +2305,13 @@ document.addEventListener('DOMContentLoaded', function() {
       showToast('パスワードを解除しました');
     });
     updatePwStatus();
+    document.getElementById('lock-on').addEventListener('click', function() {
+      if (!confirm('注文の受付を停止します。よろしいですか？')) return;
+      setOrderLock(true);
+    });
+    document.getElementById('lock-off').addEventListener('click', function() { setOrderLock(false); });
+    renderLockStatus();
+    renderOrderLockNotice();
 
     document.getElementById('data-export').addEventListener('click', dataExport);
     document.getElementById('data-import').addEventListener('click', dataImport);

@@ -221,7 +221,13 @@ function initOrderTab() {
     if (defM > 12) { defM=1; defY++; }
     ySel.value = defY; mSel.value = defM;
   }
-  populateOrderStaff();
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(sc) {
+    config = sc || {};
+  }).catch(function(){}).then(function() {
+    renderOrderLockNotice();
+    setOrderControlsDisabled(isOrderInputBlocked());
+    populateOrderStaff();
+  });
 }
 
 function populateOrderStaff() {
@@ -272,7 +278,9 @@ function renderOrderGrid() {
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var cfm = getOrderStatus(childId, y, m);
-  orderLocked = cfm;
+  renderOrderLockNotice();
+  setOrderControlsDisabled(isOrderInputBlocked());
+  orderLocked = cfm || isOrderInputBlocked();
   orderDirty = false;
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
@@ -322,6 +330,7 @@ function createCellClickHandler() {
     var sid = document.getElementById('order-staff').value;
     var cy = parseInt(document.getElementById('order-year').value);
     var cm = parseInt(document.getElementById('order-month').value);
+    if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
     var cur = getOrder(cid, cy, cm, day)[meal] || '';
     var idx = TYPE_CYCLE.indexOf(cur);
     var next = TYPE_CYCLE[(idx + 1) % TYPE_CYCLE.length];
@@ -384,6 +393,7 @@ function confirmOrder() {
   var childId = document.getElementById('order-child').value;
   var staffId = document.getElementById('order-staff').value;
   if (!childId) return;
+  if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var was = getOrderStatus(childId, y, m);
@@ -400,6 +410,7 @@ function editOrder() {
   var childId = document.getElementById('order-child').value;
   var staffId = document.getElementById('order-staff').value;
   if (!childId) return;
+  if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
   var savedPw = getEditPassword();
   if (savedPw) {
     var input = prompt('編集パスワードを入力してください');
@@ -433,7 +444,34 @@ function setCellsDisabled(disabled) {
   }
 }
 
+// ==================== ORDER LOCK (受付停止) ====================
+var DEFAULT_LOCK_MSG = '現在、注文の受付を停止しています。変更が必要な場合は栄養科までご連絡ください。';
+function isOrderInputBlocked() {
+  return !!(config.lock && config.lock.on);
+}
+function getLockMessage() {
+  return (config.lock && config.lock.msg) ? config.lock.msg : DEFAULT_LOCK_MSG;
+}
+function renderOrderLockNotice() {
+  var el = document.getElementById('order-lock-notice');
+  if (!el) return;
+  if (isOrderInputBlocked()) {
+    el.textContent = '【受付停止中】' + getLockMessage();
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+function setOrderControlsDisabled(disabled) {
+  var ids = ['bulk-weekday-all','bulk-copy-prev','bulk-clear','order-confirm','order-edit'];
+  for (var i=0; i<ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) el.disabled = disabled;
+  }
+}
+
 function requireUnlocked() {
+  if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return false; }
   if (orderLocked) { showToast('修正ボタンを押してから操作してください'); return false; }
   return true;
 }

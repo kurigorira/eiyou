@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>職員給食注文管理システム</title>
-<link rel="stylesheet" href="style.css?v=20260721">
+<link rel="stylesheet" href="style.css?v=20260722">
 </head>
 <body>
 <div id="app">
@@ -87,6 +87,7 @@
     <!-- 注文入力 -->
     <section id="tab-order" class="tab-content">
       <h2>注文入力</h2>
+      <div id="order-lock-notice" class="notice notice-warning" style="display:none"></div>
       <div class="order-controls">
         <div class="control-row">
           <label>年月:
@@ -291,6 +292,16 @@
     <section id="tab-backup" class="tab-content">
       <h2>データ管理</h2>
       <div class="card">
+        <h3>新規注文のロック</h3>
+        <p class="help-text">締切後などに、注文入力を一時的に受付停止にします。ロック中も管理者モードでは編集できます。保育園食の注文も同時にロックされます。</p>
+        <div class="inline-form">
+          <input type="text" id="lock-msg" placeholder="表示メッセージ（省略可）" style="width:340px">
+          <button class="btn btn-danger" id="lock-on">ロックする</button>
+          <button class="btn" id="lock-off">ロック解除</button>
+        </div>
+        <p id="lock-status" class="help-text" style="margin-top:6px"></p>
+      </div>
+      <div class="card">
         <h3>編集パスワード設定</h3>
         <p class="help-text">確定済み注文の修正時に必要なパスワードを設定します。</p>
         <div class="inline-form">
@@ -322,6 +333,6 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="app.js?v=20260721"></script>
+<script src="app.js?v=20260722"></script>
 </body>
 </html>
