@@ -1098,6 +1098,41 @@ function getKensaDoctorStats(y, m) {
   return stats;
 }
 
+// 検査食を担当した職員の一覧（担当日つき）
+function buildKensaAssigneeRows(y, m) {
+  var days = daysInMonth(y, m);
+  var meals = ['b','l','d'];
+  var map = {};
+  for (var d=1; d<=days; d++) {
+    for (var j=0; j<meals.length; j++) {
+      var sid = getKensaAssign(y, m, d, meals[j]);
+      if (!sid) continue;
+      if (!map[sid]) map[sid] = {b:0, l:0, d:0, days:{b:[], l:[], d:[]}};
+      map[sid][meals[j]]++;
+      map[sid].days[meals[j]].push(d);
+    }
+  }
+  var ids = Object.keys(map).sort();
+  var out = [];
+  for (var i=0; i<ids.length; i++) {
+    var st = map[ids[i]];
+    var s = getStaffById(ids[i]);
+    out.push({
+      id: ids[i], name: s ? s.name : '', dept: s ? s.dept : '',
+      b: st.b, l: st.l, d: st.d, total: st.b+st.l+st.d, days: st.days
+    });
+  }
+  return out;
+}
+
+function kensaDaysText(days) {
+  var parts = [];
+  if (days.b.length) parts.push('朝:'+days.b.join(','));
+  if (days.l.length) parts.push('昼:'+days.l.join(','));
+  if (days.d.length) parts.push('夕:'+days.d.join(','));
+  return parts.join(' / ');
+}
+
 function buildKensaSummaryTable(y, m, tableClass) {
   var stats = getKensaDoctorStats(y, m);
   var ids = Object.keys(stats).sort();
@@ -1793,7 +1828,27 @@ function runDetailReport() {
     if (dow===6) return 'background:#e8eaf6;';
     return '';
   }
-  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 全注文者一覧（'+rows.length+'名）</h3>';
+  // 検査食を担当した職員の一覧
+  var ka = buildKensaAssigneeRows(y, m);
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 検査食 担当者一覧（'+ka.length+'名）</h3>';
+  if (ka.length === 0) {
+    html += '<p class="help-text">この月は検査食の割り当てがありません。</p>';
+  } else {
+    html += '<table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th><th>部署</th>';
+    html += '<th>検査朝</th><th>検査昼</th><th>検査夕</th><th>合計</th><th>担当日</th></tr></thead><tbody>';
+    var kb=0, kl=0, kd=0;
+    for (var i=0; i<ka.length; i++) {
+      var r = ka[i];
+      html += '<tr><td>'+esc(r.id)+'</td><td>'+esc(r.name)+'</td><td>'+esc(r.dept)+'</td>';
+      html += '<td>'+r.b+'</td><td>'+r.l+'</td><td>'+r.d+'</td><td><strong>'+r.total+'</strong></td>';
+      html += '<td style="text-align:left">'+esc(kensaDaysText(r.days))+'</td></tr>';
+      kb+=r.b; kl+=r.l; kd+=r.d;
+    }
+    html += '</tbody><tfoot><tr><td colspan="3">合計</td><td>'+kb+'</td><td>'+kl+'</td><td>'+kd+'</td><td>'+(kb+kl+kd)+'</td><td></td></tr></tfoot></table>';
+  }
+  html += '</div>';
+
+  html += '<div class="rpt-section"><h3>'+y+'年'+m+'月 全注文者一覧（'+rows.length+'名）</h3>';
   html += '<p class="help-text">検朝・検昼・検夕は検査食の担当日です。合計は注文＋検査食の総数です。</p>';
   html += '<div style="overflow-x:auto"><table class="rpt-table rpt-detail-table"><thead><tr>';
   html += '<th rowspan="2">ID</th><th rowspan="2">氏名</th><th rowspan="2">部署</th>';
@@ -1861,6 +1916,35 @@ function exportDetailExcel() {
   sheet.rows.push([XC('　うち夕食医師',4), XC(mt.dd,2), XC('-',2), XC(mt.dd,3)]);
   sheet.rows.push([XC('検査食の合計（内数）',4), XC('-',2), XC(mkSum,2), XC(mkSum,3)]);
   sheet.rows.push([XC('食事総数',3), XC(mt.b+mt.l+mt.d+mt.dd,3), XC(mkSum,3), XC(mGrand,3)]);
+  sheet.rows.push([]);
+  // 検査食 担当者一覧
+  var ka = buildKensaAssigneeRows(y, m);
+  var kaTitleRow = sheet.rows.length + 1;
+  var kaTr = [XC(y+'年'+m+'月 検査食 担当者一覧（'+ka.length+'名）', 3)];
+  for (var c=1; c<8; c++) kaTr.push(XC('',3));
+  sheet.rows.push(kaTr);
+  sheet.merges.push('A'+kaTitleRow+':H'+kaTitleRow);
+  if (ka.length === 0) {
+    sheet.rows.push([XC('この月は検査食の割り当てがありません', 4)]);
+  } else {
+    sheet.rows.push([XC('職員ID',1), XC('氏名',1), XC('部署',1), XC('検査朝',1),
+                     XC('検査昼',1), XC('検査夕',1), XC('合計',1), XC('担当日',1)]);
+    var kaHdrRow = sheet.rows.length;
+    sheet.merges.push('H'+kaHdrRow+':P'+kaHdrRow);
+    var kb=0, kl=0, kd=0;
+    for (var i=0; i<ka.length; i++) {
+      var r = ka[i];
+      var rowNum = sheet.rows.length + 1;
+      sheet.rows.push([XC(r.id,4), XC(r.name,4), XC(r.dept,4), XC(r.b,2),
+                       XC(r.l,2), XC(r.d,2), XC(r.total,3), XC(kensaDaysText(r.days),4)]);
+      sheet.merges.push('H'+rowNum+':P'+rowNum);
+      kb+=r.b; kl+=r.l; kd+=r.d;
+    }
+    var kaTotRow = sheet.rows.length + 1;
+    sheet.rows.push([XC('合計',1), XC('',1), XC('',1), XC(kb,3),
+                     XC(kl,3), XC(kd,3), XC(kb+kl+kd,3), XC('',1)]);
+    sheet.merges.push('A'+kaTotRow+':C'+kaTotRow);
+  }
   sheet.rows.push([]);
   // 全注文者一覧
   var titleRow = sheet.rows.length + 1;
