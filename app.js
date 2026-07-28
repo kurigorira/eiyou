@@ -162,6 +162,30 @@ function setOrderConfirmed(staffId, y, m, val) {
 }
 
 function emptyMeal() { return {b:false,l:false,d:false,dd:false}; }
+
+// 集計用: 「確定」済みの注文だけを対象にする（未確定は0扱い）
+function getCountedOrder(staffId, y, m, d) {
+  if (!getOrderStatus(staffId, y, m)) return emptyMeal();
+  return getOrder(staffId, y, m, d);
+}
+
+// 未確定のまま入力がある職員の一覧（集計に含まれないもの）
+function getUnconfirmedStaff(y, m) {
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var out = [];
+  for (var i=0; i<sorted.length; i++) {
+    var s = sorted[i];
+    if (getOrderStatus(s.id, y, m)) continue;
+    var n = 0;
+    for (var d=1; d<=days; d++) {
+      var o = getOrder(s.id, y, m, d);
+      if (o.b) n++; if (o.l) n++; if (o.d) n++; if (o.dd) n++;
+    }
+    if (n > 0) out.push({staff:s, count:n});
+  }
+  return out;
+}
 function getOrder(staffId, y, m, d) {
   var key = y+'-'+pad(m);
   if (!orders[key] || !orders[key][staffId] || !orders[key][staffId][d]) return emptyMeal();
@@ -239,16 +263,7 @@ function initBackupTab() {
 
 // ==================== TODAY TAB ====================
 function renderToday() {
-  fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
-    orders = serverOrders || {};
-    return fetch(API_URL + '?key=kensa').then(function(r) { return r.json(); }).then(function(serverKensa) {
-      kensa = serverKensa || {};
-    });
-  }).then(function() {
-    renderTodayInner();
-  }).catch(function() {
-    renderTodayInner();
-  });
+  fetchAggregateData(renderTodayInner);
 }
 function renderTodayInner() {
   var dateInput = document.getElementById('today-date');
@@ -267,7 +282,7 @@ function renderTodayInner() {
   var sorted = getStaffSorted();
   for (var i=0; i<sorted.length; i++) {
     var s = sorted[i];
-    var o = getOrder(s.id, y, m, d);
+    var o = getCountedOrder(s.id, y, m, d);
     if (o.b) bList.push(s);
     if (o.l) lList.push(s);
     if (o.d) dList.push(s);
@@ -958,16 +973,7 @@ function initReportTab() {
 }
 
 function runReport() {
-  fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
-    orders = serverOrders || {};
-    return fetch(API_URL + '?key=kensa').then(function(r) { return r.json(); }).then(function(serverKensa) {
-      kensa = serverKensa || {};
-    });
-  }).then(function() {
-    runReportInner();
-  }).catch(function() {
-    runReportInner();
-  });
+  fetchAggregateData(runReportInner);
 }
 
 function runReportInner() {
@@ -982,7 +988,7 @@ function runReportInner() {
     var dayB=0, dayL=0, dayD=0, dayDD=0;
     for (var i=0; i<sorted.length; i++) {
       var s = sorted[i];
-      var o = getOrder(s.id, y, m, d);
+      var o = getCountedOrder(s.id, y, m, d);
       if (o.b) { dayB++; totalB++; }
       if (o.l) { dayL++; totalL++; }
       if (o.d) { dayD++; totalD++; }
@@ -1003,8 +1009,19 @@ function runReportInner() {
   var bSum = totalB+totalKB, lSum = totalL+totalKL, dSum = totalD+totalDD+totalKD;
   var kSum = totalKB+totalKL+totalKD;
   var grand = bSum+lSum+dSum;
-  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 食事数合計（注文＋検査食）</h3>';
-  html += '<p class="help-text">総務課提出用・栄養科掲示用Excelと同じ区分です。夕は夕食医師を含みます。</p>';
+  var unconf = getUnconfirmedStaff(y, m);
+  var html = '';
+  if (unconf.length > 0) {
+    html += '<div class="notice notice-warning" style="margin-bottom:14px">';
+    html += '<strong>未確定の注文が '+unconf.length+' 名分あります（集計に含まれていません）</strong><br>';
+    var names = [];
+    for (var i=0; i<unconf.length && i<30; i++) names.push(esc(unconf[i].staff.id+' '+unconf[i].staff.name));
+    html += names.join('、');
+    if (unconf.length > 30) html += ' ほか'+(unconf.length-30)+'名';
+    html += '</div>';
+  }
+  html += '<div class="rpt-section"><h3>'+y+'年'+m+'月 食事数合計（注文＋検査食）</h3>';
+  html += '<p class="help-text">「確定」済みの注文のみを集計しています。総務課提出用・栄養科掲示用Excelと同じ区分です。夕は夕食医師を含みます。</p>';
   html += '<table class="rpt-table"><thead><tr><th>区分</th><th>注文</th><th>検査食</th><th>合計</th></tr></thead><tbody>';
   html += '<tr><td>朝の合計</td><td>'+totalB+'</td><td>'+totalKB+'</td><td>'+bSum+'</td></tr>';
   html += '<tr><td>昼の合計</td><td>'+totalL+'</td><td>'+totalKL+'</td><td>'+lSum+'</td></tr>';
@@ -1056,7 +1073,7 @@ function getMonthlyMealTotals(y, m) {
   var t = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
   for (var d=1; d<=days; d++) {
     for (var i=0; i<sorted.length; i++) {
-      var o = getOrder(sorted[i].id, y, m, d);
+      var o = getCountedOrder(sorted[i].id, y, m, d);
       if (o.b) t.b++; if (o.l) t.l++; if (o.d) t.d++; if (o.dd) t.dd++;
     }
     if (getKensaAssign(y, m, d, 'b')) t.kb++;
@@ -1143,7 +1160,7 @@ function buildMealCountData(y, m) {
       kb: getKensaAssign(y,m,d,'b')?1:0, kl: getKensaAssign(y,m,d,'l')?1:0, kd: getKensaAssign(y,m,d,'d')?1:0};
     for (var i=0; i<sorted.length; i++) {
       var s = sorted[i];
-      var o = getOrder(s.id, y, m, d);
+      var o = getCountedOrder(s.id, y, m, d);
       var doc = isDoctorDept(s.dept);
       if (o.b) { if (doc) row.bDoc++; else row.bGen++; }
       if (o.l) { if (doc) row.lDoc++; else row.lGen++; }
@@ -1155,17 +1172,24 @@ function buildMealCountData(y, m) {
   return list;
 }
 
-function fetchOrdersThen(fn) {
+function fetchAggregateData(fn) {
   var run = function() {
     try { fn(); } catch(ex) { alert('出力エラー: ' + ex.message); }
   };
-  fetch(API_URL + '?key=orders').then(function(r) { return r.json(); }).then(function(serverOrders) {
-    orders = serverOrders || {};
+  var get = function(key) {
+    return fetch(API_URL + '?key=' + key + '&t=' + Date.now()).then(function(r) { return r.json(); });
+  };
+  Promise.all([get('orders'), get('confirmed'), get('kensa')]).then(function(res) {
+    orders = res[0] || {};
+    confirmed = res[1] || {};
+    kensa = res[2] || {};
     run();
   }).catch(function() {
     run();
   });
 }
+
+function fetchOrdersThen(fn) { fetchAggregateData(fn); }
 
 // ===== 本物のXLSX(OpenXML)を生成（外部ライブラリ不要・オフライン動作） =====
 // スタイル索引: 0=既定 1=見出し 2=中央罫線 3=太字合計 4=左寄せ罫線
@@ -1731,7 +1755,7 @@ function buildDetailRows(y, m) {
     var totals = {b:0,l:0,d:0,dd:0,kb:0,kl:0,kd:0};
     var perDay = [];
     for (var d=1; d<=days; d++) {
-      var o = getOrder(s.id, y, m, d);
+      var o = getCountedOrder(s.id, y, m, d);
       var cell = {
         b: !!o.b, l: !!o.l, d: !!o.d, dd: !!o.dd,
         kb: getKensaAssign(y,m,d,'b') === s.id,
@@ -2267,16 +2291,16 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('order-edit').addEventListener('click', editOrder);
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
-    document.getElementById('rpt-detail').addEventListener('click', runDetailReport);
-    document.getElementById('rpt-detail-excel').addEventListener('click', exportDetailExcel);
-    document.getElementById('rpt-kensa-csv').addEventListener('click', exportKensaCSV);
+    document.getElementById('rpt-detail').addEventListener('click', function(){ fetchAggregateData(runDetailReport); });
+    document.getElementById('rpt-detail-excel').addEventListener('click', function(){ fetchAggregateData(exportDetailExcel); });
+    document.getElementById('rpt-kensa-csv').addEventListener('click', function(){ fetchAggregateData(exportKensaCSV); });
     document.getElementById('rpt-soumu-excel').addEventListener('click', exportSoumuExcel);
     document.getElementById('rpt-eiyou-excel').addEventListener('click', exportEiyouExcel);
     document.getElementById('kensa-year').addEventListener('change', renderKensaGrid);
     document.getElementById('kensa-month').addEventListener('change', renderKensaGrid);
     document.getElementById('kensa-save').addEventListener('click', saveKensaMonth);
     document.getElementById('kensa-excel').addEventListener('click', exportKensaExcel);
-    document.getElementById('rpt-csv').addEventListener('click', exportReportCSV);
+    document.getElementById('rpt-csv').addEventListener('click', function(){ fetchAggregateData(exportReportCSV); });
     document.getElementById('rpt-print').addEventListener('click', function(){window.print();});
 
     var histDateInput = document.getElementById('hist-date-filter');

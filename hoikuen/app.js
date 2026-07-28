@@ -118,6 +118,12 @@ function getStaffWithChildren() {
 }
 
 function emptyMeal() { return {b:'',s1:'',l:'',s2:'',d:''}; }
+
+// 集計用: 「確定」済みの注文だけを対象にする（未確定は0扱い）
+function getCountedOrder(childId, y, m, d) {
+  if (!getOrderStatus(childId, y, m)) return emptyMeal();
+  return getOrder(childId, y, m, d);
+}
 function getOrder(childId, y, m, d) {
   var key = y+'-'+pad(m);
   if (!orders[key] || !orders[key][childId] || !orders[key][childId][d]) return emptyMeal();
@@ -164,7 +170,21 @@ function showTab(name) {
 }
 
 // ==================== TODAY TAB ====================
+function fetchAggregateData(fn) {
+  var get = function(key) {
+    return fetch(API_URL + '?key=' + key + '&t=' + Date.now()).then(function(r) { return r.json(); });
+  };
+  Promise.all([get('hoiku_orders'), get('hoiku_confirmed')]).then(function(res) {
+    orders = res[0] || {};
+    hoikuConfirmed = res[1] || {};
+    fn();
+  }).catch(function() { fn(); });
+}
 function renderToday() {
+  fetchAggregateData(renderTodayInner);
+}
+
+function renderTodayInner() {
   var dateInput = document.getElementById('today-date');
   var ds = dateInput.value;
   if (!ds) { ds = fmtDate(new Date()); dateInput.value = ds; }
@@ -180,7 +200,7 @@ function renderToday() {
   var lists = {b:[],s1:[],l:[],s2:[],d:[]};
   for (var i=0; i<children.length; i++) {
     var c = children[i];
-    var o = getOrder(c.id, y, m, d);
+    var o = getCountedOrder(c.id, y, m, d);
     var s = getStaffById(c.staffId);
     var pName = s ? s.name : c.staffId;
     for (var k=0; k<MEAL_KEYS.length; k++) {
@@ -564,6 +584,10 @@ function initReportTab() {
 }
 
 function runReport() {
+  fetchAggregateData(runReportInner);
+}
+
+function runReportInner() {
   var y = parseInt(document.getElementById('rpt-year').value);
   var m = parseInt(document.getElementById('rpt-month').value);
   var days = daysInMonth(y, m);
@@ -576,7 +600,7 @@ function runReport() {
     var dayT = {b:0,s1:0,l:0,s2:0,d:0};
     for (var i=0; i<children.length; i++) {
       var c = children[i];
-      var o = getOrder(c.id, y, m, d);
+      var o = getCountedOrder(c.id, y, m, d);
       for (var k=0; k<MEAL_KEYS.length; k++) {
         var mk = MEAL_KEYS[k];
         if (o[mk]) { dayT[mk]++; totals[mk]++;
@@ -590,7 +614,7 @@ function runReport() {
     var c = children[i]; var s = getStaffById(c.staffId);
     var ct = {b:0,s1:0,l:0,s2:0,d:0}; var cn = {b:0,s1:0,l:0,s2:0,d:0}; var ck = {b:0,s1:0,l:0,s2:0,d:0};
     for (var d=1; d<=days; d++) {
-      var o = getOrder(c.id, y, m, d);
+      var o = getCountedOrder(c.id, y, m, d);
       for (var k=0; k<MEAL_KEYS.length; k++) {
         var mk = MEAL_KEYS[k];
         if (o[mk]) { ct[mk]++; if(o[mk]==='normal') cn[mk]++; else ck[mk]++; }
