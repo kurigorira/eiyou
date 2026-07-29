@@ -258,6 +258,7 @@ function initBackupTab() {
   }).catch(function(){}).then(function() {
     updatePwStatus();
     renderLockStatus();
+    renderIdModeStatus();
   });
 }
 
@@ -547,8 +548,14 @@ function initOrderTab() {
     if (defM>12) { defM=1; defY++; }
     ySel.value = defY; mSel.value = defM;
   }
-  populateOrderDept();
-  populateOrderStaff();
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(sc) {
+    config = sc || {};
+  }).catch(function(){}).then(function() {
+    renderOrderLockNotice();
+    applyOrderIdentityUI();
+    populateOrderDept();
+    populateOrderStaff();
+  });
 }
 
 function populateOrderDept() {
@@ -563,8 +570,21 @@ function populateOrderDept() {
 }
 
 function populateOrderStaff() {
-  var dept = document.getElementById('order-dept').value;
   var sel = document.getElementById('order-staff');
+  // 本人モード中は、確認したID本人だけを対象にする
+  if (isIdModeActive()) {
+    sel.innerHTML = '';
+    if (!identifiedStaffId) { renderOrderGrid(); return; }
+    var me = getStaffById(identifiedStaffId);
+    var mo = document.createElement('option');
+    mo.value = identifiedStaffId;
+    mo.textContent = identifiedStaffId + ' ' + (me ? me.name : '');
+    sel.appendChild(mo);
+    sel.value = identifiedStaffId;
+    renderOrderGrid();
+    return;
+  }
+  var dept = document.getElementById('order-dept').value;
   var cur = sel.value;
   sel.innerHTML = '<option value="">-- 選択 --</option>';
   var sorted = getStaffSorted();
@@ -585,7 +605,8 @@ function renderOrderGrid() {
   var actions = document.getElementById('order-actions');
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) {
-    wrap.innerHTML = '<p class="placeholder-msg">職員を選択してください</p>';
+    wrap.innerHTML = '<p class="placeholder-msg">' +
+      (isIdModeActive() ? '職員IDを入力してください' : '職員を選択してください') + '</p>';
     summary.style.display = 'none';
     actions.style.display = 'none';
     return;
@@ -659,9 +680,9 @@ function renderOrderGridInner() {
       var cm = parseInt(document.getElementById('order-month').value);
       var day = parseInt(this.getAttribute('data-d'));
       var meal = this.getAttribute('data-m');
-      if (isOrderInputBlocked()) {
+      if (!allowStaffTarget(sid) || isOrderInputBlocked()) {
         this.checked = !this.checked;
-        showToast('現在、注文の受付を停止しています');
+        if (isOrderInputBlocked()) showToast('現在、注文の受付を停止しています');
         return;
       }
       setOrder(sid, cy, cm, day, meal, this.checked);
@@ -725,6 +746,7 @@ function getOrderSummaryText(staffId, y, m) {
 function confirmOrder() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) return;
+  if (!allowStaffTarget(staffId)) return;
   if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
@@ -751,6 +773,7 @@ function confirmOrder() {
 function editOrder() {
   var staffId = document.getElementById('order-staff').value;
   if (!staffId) return;
+  if (!allowStaffTarget(staffId)) return;
   fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(serverConfig) {
     config = serverConfig || {};
     if (isOrderInputBlocked()) {
@@ -798,6 +821,107 @@ function updateOrderSummary(y, m, staffId) {
   document.getElementById('os-l').textContent = totL;
   document.getElementById('os-d').textContent = totD;
   document.getElementById('os-dd').textContent = totDD;
+}
+
+// ==================== 本人モード（ID入力） ====================
+var identifiedStaffId = null;
+
+function isIdModeOn() {
+  return !!(config.orderIdMode && config.orderIdMode.on);
+}
+// 管理者モード中は従来どおり全職員を選べる
+function isIdModeActive() {
+  return isIdModeOn() && !adminMode;
+}
+
+function applyOrderIdentityUI() {
+  var panel = document.getElementById('order-identify');
+  var banner = document.getElementById('order-identified');
+  var picker = document.getElementById('order-staff-picker');
+  var controls = document.querySelector('#tab-order .order-controls');
+  var wrap = document.getElementById('order-grid-wrap');
+  if (!panel) return;
+  if (!isIdModeActive()) {
+    panel.style.display = 'none';
+    banner.style.display = 'none';
+    if (picker) picker.style.display = '';
+    if (controls) controls.style.display = '';
+    return;
+  }
+  if (picker) picker.style.display = 'none';
+  if (identifiedStaffId) {
+    var s = getStaffById(identifiedStaffId);
+    panel.style.display = 'none';
+    banner.style.display = 'block';
+    document.getElementById('ident-name').textContent =
+      identifiedStaffId + '　' + (s ? s.name : '') + '（' + (s ? s.dept : '') + '）';
+    if (controls) controls.style.display = '';
+  } else {
+    panel.style.display = 'block';
+    banner.style.display = 'none';
+    if (controls) controls.style.display = 'none';
+    if (wrap) wrap.innerHTML = '<p class="placeholder-msg">職員IDを入力してください</p>';
+    document.getElementById('order-summary').style.display = 'none';
+    document.getElementById('order-actions').style.display = 'none';
+  }
+}
+
+function submitIdentify(e) {
+  if (e) e.preventDefault();
+  var err = document.getElementById('ident-error');
+  var id = (document.getElementById('ident-id').value || '').trim();
+  err.textContent = '';
+  if (!id) { err.textContent = '職員IDを入力してください'; return; }
+  var s = getStaffById(id);
+  if (!s) { err.textContent = '職員ID「'+id+'」は登録されていません。IDをご確認ください。'; return; }
+  identifiedStaffId = s.id;
+  document.getElementById('ident-id').value = '';
+  applyOrderIdentityUI();
+  populateOrderStaff();
+}
+
+function allowStaffTarget(staffId) {
+  if (!isIdModeActive()) return true;
+  if (identifiedStaffId && staffId === identifiedStaffId) return true;
+  showToast('本人確認したご自身の注文のみ操作できます');
+  return false;
+}
+
+function clearIdentify() {
+  identifiedStaffId = null;
+  document.getElementById('ident-error').textContent = '';
+  applyOrderIdentityUI();
+}
+
+function renderIdModeStatus() {
+  var el = document.getElementById('idmode-status');
+  if (!el) return;
+  el.textContent = isIdModeOn()
+    ? '現在オンです。注文入力時に職員IDの入力が必要です。'
+    : '現在オフです。注文入力タブで全職員をプルダウンから選択できます。';
+}
+
+function setIdMode(on) {
+  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(sc) {
+    config = sc || {};
+    config.orderIdMode = {on: !!on};
+    return fetch(API_URL + '?key=config&action=merge', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({orderIdMode: config.orderIdMode})
+    }).then(function(r) { return r.json(); });
+  }).then(function(res) {
+    if (!res || !res.ok) {
+      alert('設定の保存に失敗しました: ' + ((res && res.error) || '不明なエラー'));
+      return;
+    }
+    if (!on) identifiedStaffId = null;
+    renderIdModeStatus();
+    applyOrderIdentityUI();
+    showToast(on ? '本人モードにしました' : '本人モードを解除しました');
+  }).catch(function(e) {
+    alert('設定の保存に失敗しました（通信エラー）: ' + e.message);
+  });
 }
 
 // ==================== ORDER LOCK (受付停止) ====================
@@ -870,6 +994,7 @@ function setOrderLock(on) {
 }
 
 function requireUnlocked() {
+  if (!allowStaffTarget(document.getElementById('order-staff').value)) return false;
   if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return false; }
   if (orderLocked) { showToast('修正ボタンを押してから操作してください'); return false; }
   return true;
@@ -955,6 +1080,7 @@ function renderOrderGridDirect() {
 }
 
 function navigateStaff(dir) {
+  if (isIdModeActive()) { showToast('本人確認したご自身の注文のみ操作できます'); return; }
   var sel = document.getElementById('order-staff');
   var idx = sel.selectedIndex + dir;
   if (idx < 1) idx = sel.options.length - 1;
@@ -2328,8 +2454,9 @@ function applyAdminMode() {
     btn.classList.remove('active-admin');
   }
   renderOrderLockNotice();
-  if (document.getElementById('order-staff') && document.getElementById('order-staff').value) {
-    renderOrderGridInner();
+  applyOrderIdentityUI();
+  if (document.getElementById('order-staff')) {
+    populateOrderStaff();
   }
 }
 
@@ -2425,6 +2552,11 @@ document.addEventListener('DOMContentLoaded', function() {
       setOrderLock(true);
     });
     document.getElementById('lock-off').addEventListener('click', function() { setOrderLock(false); });
+    document.getElementById('idmode-on').addEventListener('click', function() { setIdMode(true); });
+    document.getElementById('idmode-off').addEventListener('click', function() { setIdMode(false); });
+    document.getElementById('ident-form').addEventListener('submit', submitIdentify);
+    document.getElementById('ident-change').addEventListener('click', clearIdentify);
+    renderIdModeStatus();
     renderLockStatus();
     renderOrderLockNotice();
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>職員給食注文管理システム</title>
-<link rel="stylesheet" href="style.css?v=20260725">
+<link rel="stylesheet" href="style.css?v=20260726">
 </head>
 <body>
 <div id="app">
@@ -88,20 +88,35 @@
     <section id="tab-order" class="tab-content">
       <h2>注文入力</h2>
       <div id="order-lock-notice" class="notice notice-warning" style="display:none"></div>
+      <div id="order-identify" class="card" style="display:none">
+        <h3>本人確認</h3>
+        <p class="help-text">ご自身の職員IDを入力してください。入力した職員の注文のみ操作できます。</p>
+        <form id="ident-form" class="inline-form">
+          <input type="text" id="ident-id" placeholder="職員ID" style="width:180px">
+          <button type="submit" class="btn">確認</button>
+        </form>
+        <p id="ident-error" class="help-text" style="color:#dc3545;margin-top:6px"></p>
+      </div>
+      <div id="order-identified" class="notice" style="display:none;background:#e8f0fe;border:1px solid #1a56db">
+        <strong id="ident-name"></strong> として注文します
+        <button class="btn-sm" id="ident-change" style="margin-left:12px">別の職員に切替</button>
+      </div>
       <div class="order-controls">
         <div class="control-row">
           <label>年月:
             <select id="order-year"></select>年
             <select id="order-month"></select>月
           </label>
-          <label>部署:
-            <select id="order-dept"><option value="">全部署</option></select>
-          </label>
-          <label>職員:
-            <select id="order-staff"><option value="">-- 選択 --</option></select>
-          </label>
-          <button id="order-prev-staff" class="btn-sm">&lt; 前</button>
-          <button id="order-next-staff" class="btn-sm">次 &gt;</button>
+          <span id="order-staff-picker">
+            <label>部署:
+              <select id="order-dept"><option value="">全部署</option></select>
+            </label>
+            <label>職員:
+              <select id="order-staff"><option value="">-- 選択 --</option></select>
+            </label>
+            <button id="order-prev-staff" class="btn-sm">&lt; 前</button>
+            <button id="order-next-staff" class="btn-sm">次 &gt;</button>
+          </span>
         </div>
         <div class="control-row">
           <button class="btn btn-outline" id="bulk-weekday-b">平日朝食</button>
@@ -292,6 +307,15 @@
     <section id="tab-backup" class="tab-content">
       <h2>データ管理</h2>
       <div class="card">
+        <h3>本人モード（IDを入力した職員の注文のみ）</h3>
+        <p class="help-text">オンにすると、注文入力タブで最初に職員IDの入力を求め、その職員の注文だけ操作できるようになります。他の職員との取り違えを防げます。管理者モードでは従来どおり全職員を選択できます。</p>
+        <div class="inline-form">
+          <button class="btn" id="idmode-on">本人モードにする</button>
+          <button class="btn btn-outline" id="idmode-off">解除（全職員を選択可）</button>
+        </div>
+        <p id="idmode-status" class="help-text" style="margin-top:6px"></p>
+      </div>
+      <div class="card">
         <h3>新規注文のロック</h3>
         <p class="help-text">締切後などに、注文入力を一時的に受付停止にします。ロック中も管理者モードでは編集できます。保育園食の注文も同時にロックされます。</p>
         <div class="inline-form">
@@ -333,6 +357,6 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="app.js?v=20260725"></script>
+<script src="app.js?v=20260726"></script>
 </body>
 </html>
