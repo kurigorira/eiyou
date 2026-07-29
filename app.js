@@ -728,6 +728,13 @@ function confirmOrder() {
   if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
+  var s = getStaffById(staffId);
+  var msg = '【確定の確認】この職員の注文で間違いありませんか？\n\n'
+    + '　職員　： ' + staffId + '　' + (s ? s.name : '') + '\n'
+    + '　部署　： ' + (s ? s.dept : '') + '\n'
+    + '　対象月： ' + y + '年' + m + '月\n'
+    + '　内容　： ' + getOrderSummaryText(staffId, y, m) + '\n';
+  if (!confirm(msg)) return;
   var wasConfirmed = getOrderStatus(staffId, y, m);
   saveOrdersForStaff(staffId, y, m);
   setOrderConfirmed(staffId, y, m, true);

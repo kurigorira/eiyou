@@ -416,6 +416,14 @@ function confirmOrder() {
   if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
+  var c = getChildById(childId);
+  var ps = getStaffById(staffId);
+  var msg = '【確定の確認】この子供の注文で間違いありませんか？\n\n'
+    + '　子供　： ' + (c ? c.name : childId) + '\n'
+    + '　保護者： ' + (ps ? ps.id + '　' + ps.name : staffId) + '\n'
+    + '　対象月： ' + y + '年' + m + '月\n'
+    + '　内容　： ' + getSummaryText(childId, y, m) + '\n';
+  if (!confirm(msg)) return;
   var was = getOrderStatus(childId, y, m);
   saveOrdersForChild(childId, y, m);
   setOrderConfirmed(childId, y, m, true);
