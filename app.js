@@ -1663,9 +1663,9 @@ function exportEiyouExcel() {
     var days = data.length;
     var sheet = {name:'栄養科掲示用', rows:[], merges:[], cols:[]};
     sheet.cols = [5,5,5,5,2,5,5,5,5];
-    // 各日: 朝=朝食+検査朝, 昼=昼食+検査昼, 夕=夕食+夕食医師+検査夕
+    // 各日: 朝=朝食+検査朝, 昼=昼食+検査昼+1, 夕=夕食+夕食医師+検査夕
     function mB(r){ return r.bDoc+r.bGen+r.kb; }
-    function mL(r){ return r.lDoc+r.lGen+r.kl; }
+    function mL(r){ return r.lDoc+r.lGen+r.kl+1; }
     function mD(r){ return r.dDoc+r.dGen+r.kd; }
     // タイトル (9列結合)
     var r1 = [XC(y+'年　'+m+'月　　職員食食数表', 12)];
