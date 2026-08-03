@@ -586,6 +586,8 @@ function populateOrderStaff() {
   }
   var dept = document.getElementById('order-dept').value;
   var cur = sel.value;
+  // 外部起動で職員IDが渡されていれば初回のみ自動選択
+  if (!cur && pendingPreselectStaffId) { cur = pendingPreselectStaffId; pendingPreselectStaffId = null; }
   sel.innerHTML = '<option value="">-- 選択 --</option>';
   var sorted = getStaffSorted();
   for (var i=0; i<sorted.length; i++) {
@@ -825,6 +827,46 @@ function updateOrderSummary(y, m, staffId) {
 
 // ==================== 本人モード（ID入力） ====================
 var identifiedStaffId = null;
+var pendingPreselectStaffId = null;
+
+// 電子カルテなど外部システムからの起動時に職員IDを受け取る
+// 例: index.html?staffId=A001 / ?uid=A001 / ?id=A001
+var URL_STAFF_KEYS = ['staffid','staff','staffno','uid','userid','user','id','empid','employeeid','shokuinid'];
+
+function getUrlStaffId() {
+  var q = window.location.search;
+  if (!q || q.length < 2) return '';
+  var parts = q.substring(1).split('&');
+  for (var i=0; i<parts.length; i++) {
+    var eq = parts[i].indexOf('=');
+    if (eq < 0) continue;
+    var k, v;
+    try {
+      k = decodeURIComponent(parts[i].substring(0, eq)).trim().toLowerCase();
+      v = decodeURIComponent(parts[i].substring(eq+1).replace(/\+/g, ' ')).trim();
+    } catch (ex) { continue; }
+    if (URL_STAFF_KEYS.indexOf(k) !== -1 && v) return v;
+  }
+  return '';
+}
+
+// 起動時にURLの職員IDを適用する（見つかれば注文入力タブを開く）
+function applyUrlStaffId() {
+  var id = getUrlStaffId();
+  if (!id) return false;
+  var s = getStaffById(id);
+  if (!s) {
+    var el = document.getElementById('ident-error');
+    if (el) el.textContent = '起動時に渡された職員ID「'+id+'」は登録されていません。IDを入力してください。';
+    showToast('職員ID「'+id+'」は登録されていません');
+    return false;
+  }
+  identifiedStaffId = s.id;
+  pendingPreselectStaffId = s.id;
+  showTab('order');
+  showToast(s.name + ' さんとして起動しました');
+  return true;
+}
 
 function isIdModeOn() {
   return !!(config.orderIdMode && config.orderIdMode.on);
@@ -2563,6 +2605,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('data-export').addEventListener('click', dataExport);
     document.getElementById('data-import').addEventListener('click', dataImport);
     document.getElementById('data-clear').addEventListener('click', dataClear);
+
+    // 電子カルテ等から職員ID付きで起動された場合は本人確認済みで注文入力を開く
+    if (applyUrlStaffId()) return;
 
     renderToday();
   }).catch(function(err) {
