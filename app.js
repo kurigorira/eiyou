@@ -827,6 +827,7 @@ function updateOrderSummary(y, m, staffId) {
 
 // ==================== 本人モード（ID入力） ====================
 var identifiedStaffId = null;
+var identityFromUrl = false;   // 電子カルテ等からURLで職員IDを受け取った場合 true
 var pendingPreselectStaffId = null;
 
 // 電子カルテなど外部システムからの起動時に職員IDを受け取る
@@ -862,6 +863,7 @@ function applyUrlStaffId() {
     return false;
   }
   identifiedStaffId = s.id;
+  identityFromUrl = true;
   pendingPreselectStaffId = s.id;
   showTab('order');
   showToast(s.name + ' さんとして起動しました');
@@ -897,6 +899,9 @@ function applyOrderIdentityUI() {
     banner.style.display = 'block';
     document.getElementById('ident-name').textContent =
       identifiedStaffId + '　' + (s ? s.name : '') + '（' + (s ? s.dept : '') + '）';
+    // 電子カルテから起動された場合は他の職員に切り替えさせない
+    var chg = document.getElementById('ident-change');
+    if (chg) chg.style.display = identityFromUrl ? 'none' : '';
     if (controls) controls.style.display = '';
   } else {
     panel.style.display = 'block';
@@ -917,6 +922,7 @@ function submitIdentify(e) {
   var s = getStaffById(id);
   if (!s) { err.textContent = '職員ID「'+id+'」は登録されていません。IDをご確認ください。'; return; }
   identifiedStaffId = s.id;
+  identityFromUrl = false;
   document.getElementById('ident-id').value = '';
   applyOrderIdentityUI();
   populateOrderStaff();
@@ -931,6 +937,7 @@ function allowStaffTarget(staffId) {
 
 function clearIdentify() {
   identifiedStaffId = null;
+  identityFromUrl = false;
   document.getElementById('ident-error').textContent = '';
   applyOrderIdentityUI();
 }
