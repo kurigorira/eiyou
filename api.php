@@ -45,7 +45,17 @@ $file = $dataDir . DIRECTORY_SEPARATOR . $key . '.json';
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if (file_exists($file)) {
-        readfile($file);
+        // 書き込み中(LOCK_EX)の読み取りを待ち、中途半端な内容を返さない
+        $fp = @fopen($file, 'r');
+        if ($fp && flock($fp, LOCK_SH)) {
+            $stat = fstat($fp);
+            echo ($stat['size'] > 0) ? fread($fp, $stat['size']) : $defaults[$key];
+            flock($fp, LOCK_UN);
+            fclose($fp);
+        } else {
+            if ($fp) fclose($fp);
+            readfile($file);
+        }
     } else {
         echo $defaults[$key];
     }
@@ -117,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         fclose($fp);
     }
     if ($written) {
-        echo json_encode(array('ok' => true), JSON_UNESCAPED_UNICODE);
+        echo json_encode(array('ok' => true, 'apiVer' => 2), JSON_UNESCAPED_UNICODE);
     } else {
         http_response_code(500);
         echo json_encode(array('error' => $errMsg), JSON_UNESCAPED_UNICODE);
