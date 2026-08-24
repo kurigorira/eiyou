@@ -72,14 +72,55 @@ function saveOrdersForStaff(staffId, y, m) {
   partial[key][staffId] = (orders[key] && orders[key][staffId]) ? orders[key][staffId] : null;
   apiMerge('orders', partial, 2);
 }
+// 保存要求を key ごとに直列化する。
+// 並行して投げると到着順が入れ替わり、古い内容が新しい内容を上書きしてしまうため、
+// 送信中は次の内容を保留にまとめ、完了後にまとめて送る。
+var mergeQueue = {};
+
+function mergePartialInto(target, src, depth) {
+  for (var k in src) {
+    if (depth >= 2 && src[k] && typeof src[k] === 'object' && !Array.isArray(src[k])) {
+      if (!target[k] || typeof target[k] !== 'object') target[k] = {};
+      for (var k2 in src[k]) target[k][k2] = src[k][k2];
+    } else {
+      target[k] = src[k];
+    }
+  }
+}
+
 function apiMerge(key, data, depth) {
+  var q = mergeQueue[key];
+  if (!q) q = mergeQueue[key] = {inFlight: false, pending: null, pendingDepth: depth};
+  if (q.inFlight) {
+    if (!q.pending) { q.pending = {}; q.pendingDepth = depth; }
+    mergePartialInto(q.pending, data, depth || 1);
+    return;
+  }
+  q.inFlight = true;
   var url = API_URL + '?key=' + key + '&action=merge';
   if (depth) url += '&depth=' + depth;
   fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(data)
-  }).catch(function(e) { console.error('Merge failed:', key, e); });
+  }).catch(function(e) {
+    console.error('Merge failed:', key, e);
+  }).then(function() {
+    q.inFlight = false;
+    if (q.pending) {
+      var next = q.pending, nextDepth = q.pendingDepth;
+      q.pending = null;
+      apiMerge(key, next, nextDepth);
+    }
+  });
+}
+
+// 保存要求がすべて送信し終わるまで待つ
+function waitForMergeIdle(key, cb, tries) {
+  tries = tries || 0;
+  var q = mergeQueue[key];
+  if (!q || (!q.inFlight && !q.pending) || tries > 100) { cb(); return; }
+  setTimeout(function() { waitForMergeIdle(key, cb, tries + 1); }, 50);
 }
 function saveHolidays() { apiSave('holidays', holidays); }
 function saveHistory() { apiSave('history', opHistory); }
@@ -1763,12 +1804,20 @@ function initKensaTab() {
     }
     ySel.value = now.getFullYear(); mSel.value = now.getMonth()+1;
   }
-  fetch(API_URL + '?key=kensa').then(function(r) { return r.json(); }).then(function(serverKensa) {
-    kensa = serverKensa || {};
+  fetch(API_URL + '?key=kensa&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(serverKensa) {
+    if (!kensaDirty) kensa = serverKensa || {};
     renderKensaGrid();
   }).catch(function() {
     renderKensaGrid();
   });
+}
+
+function confirmLeaveKensa() {
+  if (kensaDirty && !confirm('未登録の変更があります。「登録」を押さずに月を切り替えると、\nこの画面の変更は保存されません。切り替えますか？')) {
+    return;
+  }
+  kensaDirty = false;
+  renderKensaGrid();
 }
 
 function renderKensaGrid() {
@@ -1827,11 +1876,26 @@ function renderKensaGrid() {
   renderKensaSummary(y, m);
 }
 
+var kensaDirty = false;
+
+function renderKensaDirtyState() {
+  var el = document.getElementById('kensa-save-status');
+  if (!el) return;
+  if (kensaDirty) {
+    el.textContent = '未登録の変更があります。「登録」ボタンを押してください。';
+    el.style.color = '#dc3545';
+  } else {
+    el.style.color = '';
+  }
+}
+
 function setKensaAssign(y, m, d, meal, staffId) {
   var ym = y+'-'+pad(m);
   if (!kensa[ym]) kensa[ym] = {};
   if (!kensa[ym][d]) kensa[ym][d] = {};
   if (staffId) kensa[ym][d][meal] = staffId; else delete kensa[ym][d][meal];
+  kensaDirty = true;
+  renderKensaDirtyState();
   var partial = {};
   partial[ym] = {};
   partial[ym][d] = kensa[ym][d];
@@ -1843,16 +1907,23 @@ function saveKensaMonth() {
   var m = parseInt(document.getElementById('kensa-month').value);
   var ym = y+'-'+pad(m);
   var statusEl = document.getElementById('kensa-save-status');
+  var btn = document.getElementById('kensa-save');
+  if (btn.disabled) return;
+  btn.disabled = true;
   statusEl.textContent = '登録中...';
+  var done = function() { btn.disabled = false; };
   var monthData = kensa[ym] || {};
   var partial = {};
   partial[ym] = monthData;
+  // 保留中の自動保存が後から届いて上書きしないよう、先に送信を完了させる
+  waitForMergeIdle('kensa', function() {
   fetch(API_URL + '?key=kensa&action=merge', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(partial)
   }).then(function(r) { return r.json(); }).then(function(res) {
     if (!res || !res.ok) {
+      done();
       statusEl.textContent = '登録に失敗しました';
       var msg = res && res.error ? res.error : '不明なエラー';
       alert('登録に失敗しました: ' + msg + '\n\nサーバーの api.php が古い可能性があります。api.php を最新版に更新してください。');
@@ -1871,8 +1942,11 @@ function saveKensaMonth() {
           }
         }
       }
+      done();
       if (mismatch.length === 0) {
         kensa = serverKensa;
+        kensaDirty = false;
+        renderKensaDirtyState();
         statusEl.textContent = '登録しました（' + new Date().toLocaleTimeString('ja-JP') + '）サーバー保存確認済み';
         showToast(y+'年'+m+'月の検査食割り当てを登録しました');
       } else {
@@ -1883,8 +1957,10 @@ function saveKensaMonth() {
       }
     });
   }).catch(function(e) {
+    done();
     statusEl.textContent = '登録に失敗しました';
     alert('登録に失敗しました（通信エラー）: ' + e.message);
+  });
   });
 }
 
@@ -2563,8 +2639,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('rpt-kensa-csv').addEventListener('click', function(){ fetchAggregateData(exportKensaCSV); });
     document.getElementById('rpt-soumu-excel').addEventListener('click', exportSoumuExcel);
     document.getElementById('rpt-eiyou-excel').addEventListener('click', exportEiyouExcel);
-    document.getElementById('kensa-year').addEventListener('change', renderKensaGrid);
-    document.getElementById('kensa-month').addEventListener('change', renderKensaGrid);
+    document.getElementById('kensa-year').addEventListener('change', confirmLeaveKensa);
+    document.getElementById('kensa-month').addEventListener('change', confirmLeaveKensa);
     document.getElementById('kensa-save').addEventListener('click', saveKensaMonth);
     document.getElementById('kensa-excel').addEventListener('click', exportKensaExcel);
     document.getElementById('rpt-csv').addEventListener('click', function(){ fetchAggregateData(exportReportCSV); });

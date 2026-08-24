@@ -46,14 +46,45 @@ function saveOrdersForChild(childId, y, m) {
   partial[key][childId] = (orders[key] && orders[key][childId]) ? orders[key][childId] : null;
   apiMerge('hoiku_orders', partial, 2);
 }
+// 保存要求を key ごとに直列化する（並行送信で古い内容が新しい内容を上書きするのを防ぐ）
+var mergeQueue = {};
+
+function mergePartialInto(target, src, depth) {
+  for (var k in src) {
+    if (depth >= 2 && src[k] && typeof src[k] === 'object' && !Array.isArray(src[k])) {
+      if (!target[k] || typeof target[k] !== 'object') target[k] = {};
+      for (var k2 in src[k]) target[k][k2] = src[k][k2];
+    } else {
+      target[k] = src[k];
+    }
+  }
+}
+
 function apiMerge(key, data, depth) {
+  var q = mergeQueue[key];
+  if (!q) q = mergeQueue[key] = {inFlight: false, pending: null, pendingDepth: depth};
+  if (q.inFlight) {
+    if (!q.pending) { q.pending = {}; q.pendingDepth = depth; }
+    mergePartialInto(q.pending, data, depth || 1);
+    return;
+  }
+  q.inFlight = true;
   var url = API_URL + '?key=' + key + '&action=merge';
   if (depth) url += '&depth=' + depth;
   fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(data)
-  }).catch(function(e) { console.error('Merge failed:', key, e); });
+  }).catch(function(e) {
+    console.error('Merge failed:', key, e);
+  }).then(function() {
+    q.inFlight = false;
+    if (q.pending) {
+      var next = q.pending, nextDepth = q.pendingDepth;
+      q.pending = null;
+      apiMerge(key, next, nextDepth);
+    }
+  });
 }
 function saveHistory() { apiSave('hoiku_history', opHistory); }
 function saveConfirmed() { apiSave('hoiku_confirmed', hoikuConfirmed); }
