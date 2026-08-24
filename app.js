@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-08-24a';
+var APP_VERSION = '2026-08-24b';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
@@ -1921,55 +1921,65 @@ function saveKensaMonth() {
   function attempt(triesLeft) {
     statusEl.textContent = '登録中...';
     statusEl.style.color = '';
-    fetch(API_URL + '?key=kensa&action=merge', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(partial)
-    }).then(function(r) { return r.json(); }).then(function(res) {
-      if (!res || !res.ok) {
-        done();
-        statusEl.textContent = '登録に失敗しました';
-        var msg = res && res.error ? res.error : '不明なエラー';
-        alert('登録に失敗しました: ' + msg + '\n\nサーバーの api.php が古い可能性があります。api.php を最新版に更新してください。');
-        return;
-      }
-      if (res.apiVer) lastApiVer = 'v' + res.apiVer;
-      // 保存後にサーバーから読み戻して本当に保存されたか検証
-      return fetch(API_URL + '?key=kensa&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(serverKensa) {
-        serverKensa = serverKensa || {};
-        var saved = serverKensa[ym] || {};
-        var detail = [];
-        for (var d in monthData) {
-          for (var meal in monthData[d]) {
-            var want = monthData[d][meal];
-            var got = saved[d] ? (saved[d][meal] || '(なし)') : '(日ごと消失)';
-            if (got !== want) detail.push(d + '日' + (MEAL_LABELS[meal]||meal) + ': 画面=' + want + ' サーバー=' + got);
-          }
-        }
-        if (detail.length === 0) {
+    // まずサーバーの最新の全データを取得し、この画面の月だけ差し替えて
+    // ファイル全体をそのまま書き込む（サーバー側でのデータ再加工を挟まない）
+    fetch(API_URL + '?key=kensa&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(serverNow) {
+      var full = (serverNow && typeof serverNow === 'object' && !Array.isArray(serverNow)) ? serverNow : {};
+      full[ym] = monthData;
+      return fetch(API_URL + '?key=kensa', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(full)
+      }).then(function(r) { return r.json(); }).then(function(res) {
+        if (!res || !res.ok) {
           done();
-          kensa = serverKensa;
-          kensaDirty = false;
-          renderKensaDirtyState();
-          statusEl.textContent = '登録しました（' + new Date().toLocaleTimeString('ja-JP') + '）サーバー保存確認済み';
-          showToast(y+'年'+m+'月の検査食割り当てを登録しました');
+          statusEl.textContent = '登録に失敗しました';
+          var msg = res && res.error ? res.error : '不明なエラー';
+          alert('登録に失敗しました: ' + msg + '\n\nサーバーの api.php が古い可能性があります。api.php を最新版に更新してください。');
           return;
         }
-        if (triesLeft > 0) {
-          // 直後に他の保存と競合した可能性があるため、自動でもう一度書き込む
-          statusEl.textContent = '再登録中...（確認で不一致を検出したため自動リトライ）';
-          setTimeout(function() { attempt(triesLeft - 1); }, 700);
-          return;
-        }
-        done();
-        statusEl.textContent = '登録に失敗しました（サーバーに保存されていません）';
-        alert('3回書き込みましたが、読み戻し確認で不一致が残ります。\n\n' +
-          '【不一致の内容】\n' + detail.slice(0, 8).join('\n') +
-          (detail.length > 8 ? '\nほか' + (detail.length - 8) + '件' : '') + '\n\n' +
-          '【バージョン情報】画面=' + APP_VERSION + ' / api.php=' + lastApiVer + '\n' +
-          '・画面のバージョンが ' + APP_VERSION + ' でない場合: この画面を一度閉じて開き直してください\n' +
-          '・api.php が「不明(旧版)」の場合: サーバーの api.php を最新版に上書きしてください\n' +
-          '・他のPCでもこの画面を開いている場合は閉じてから再度お試しください');
+        if (res.apiVer) lastApiVer = 'v' + res.apiVer;
+        // 保存後にサーバーから読み戻して本当に保存されたか検証
+        return fetch(API_URL + '?key=kensa&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(serverKensa) {
+          serverKensa = serverKensa || {};
+          var saved = serverKensa[ym] || {};
+          var detail = [];
+          var rawDump = '';
+          for (var d in monthData) {
+            for (var meal in monthData[d]) {
+              var want = monthData[d][meal];
+              var got = saved[d] ? (saved[d][meal] || '(なし)') : '(日ごと消失)';
+              if (got !== want) {
+                detail.push(d + '日' + (MEAL_LABELS[meal]||meal) + ': 画面=' + want + ' サーバー=' + got);
+                if (!rawDump) rawDump = 'サーバー上の' + d + '日の生データ: ' + JSON.stringify(saved[d]);
+              }
+            }
+          }
+          if (detail.length === 0) {
+            done();
+            kensa = serverKensa;
+            kensaDirty = false;
+            renderKensaDirtyState();
+            statusEl.textContent = '登録しました（' + new Date().toLocaleTimeString('ja-JP') + '）サーバー保存確認済み';
+            showToast(y+'年'+m+'月の検査食割り当てを登録しました');
+            return;
+          }
+          if (triesLeft > 0) {
+            statusEl.textContent = '再登録中...（確認で不一致を検出したため自動リトライ）';
+            setTimeout(function() { attempt(triesLeft - 1); }, 700);
+            return;
+          }
+          done();
+          statusEl.textContent = '登録に失敗しました（サーバーに保存されていません）';
+          alert('3回書き込みましたが、読み戻し確認で不一致が残ります。\n\n' +
+            '【不一致の内容】\n' + detail.slice(0, 8).join('\n') +
+            (detail.length > 8 ? '\nほか' + (detail.length - 8) + '件' : '') + '\n' +
+            rawDump + '\n\n' +
+            '【バージョン情報】画面=' + APP_VERSION + ' / api.php=' + lastApiVer + '\n' +
+            '・画面のバージョンが ' + APP_VERSION + ' でない場合: この画面を一度閉じて開き直してください\n' +
+            '・api.php が「不明(旧版)」の場合: サーバーの api.php を最新版に上書きしてください\n' +
+            '・他のPCでもこの画面を開いている場合は閉じてから再度お試しください');
+        });
       });
     }).catch(function(e) {
       done();
