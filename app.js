@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-08-24b';
+var APP_VERSION = '2026-08-24c';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
@@ -60,7 +60,7 @@ function loadData() {
     children = d.children || [];
     config = d.config || {};
     confirmed = d.confirmed || {};
-    kensa = d.kensa || {};
+    kensa = normalizeKensaData(d.kensa);
   });
 }
 
@@ -1441,7 +1441,7 @@ function fetchAggregateData(fn) {
   Promise.all([get('orders'), get('confirmed'), get('kensa')]).then(function(res) {
     orders = res[0] || {};
     confirmed = res[1] || {};
-    kensa = res[2] || {};
+    kensa = normalizeKensaData(res[2]);
     run();
   }).catch(function() {
     run();
@@ -1806,7 +1806,7 @@ function initKensaTab() {
     ySel.value = now.getFullYear(); mSel.value = now.getMonth()+1;
   }
   fetch(API_URL + '?key=kensa&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(serverKensa) {
-    if (!kensaDirty) kensa = serverKensa || {};
+    if (!kensaDirty) kensa = normalizeKensaData(serverKensa);
     renderKensaGrid();
   }).catch(function() {
     renderKensaGrid();
@@ -1890,16 +1890,52 @@ function renderKensaDirtyState() {
   }
 }
 
+// サーバーから読み込んだ検査食データを正規化する。
+// 「未割当に戻した日」は空データ {} になり、PHP側で保存されると配列 [] に変わる。
+// 配列のままだと以後の割り当てが JSON.stringify で消えてしまう（配列の追加プロパティは
+// シリアライズされない）ため、必ずプレーンなオブジェクトに変換し、空の日は取り除く。
+function normalizeKensaData(raw) {
+  var out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (var ym in raw) {
+    var month = raw[ym];
+    if (!month || typeof month !== 'object') continue;
+    var nm = {};
+    for (var d in month) {
+      var day = month[d];
+      if (!day || typeof day !== 'object') continue;
+      var nd = {};
+      if (day.b) nd.b = day.b;
+      if (day.l) nd.l = day.l;
+      if (day.d) nd.d = day.d;
+      if (nd.b || nd.l || nd.d) nm[d] = nd;
+    }
+    out[ym] = nm;
+  }
+  return out;
+}
+
 function setKensaAssign(y, m, d, meal, staffId) {
   var ym = y+'-'+pad(m);
-  if (!kensa[ym]) kensa[ym] = {};
-  if (!kensa[ym][d]) kensa[ym][d] = {};
-  if (staffId) kensa[ym][d][meal] = staffId; else delete kensa[ym][d][meal];
+  if (!kensa[ym] || typeof kensa[ym] !== 'object' || Array.isArray(kensa[ym])) kensa[ym] = {};
+  var day = kensa[ym][d];
+  // 配列化した日（PHPが空データを [] として保存したもの）はオブジェクトに作り直す
+  if (!day || typeof day !== 'object' || Array.isArray(day)) {
+    var nd = {};
+    if (day && day.b) nd.b = day.b;
+    if (day && day.l) nd.l = day.l;
+    if (day && day.d) nd.d = day.d;
+    day = kensa[ym][d] = nd;
+  }
+  if (staffId) day[meal] = staffId; else delete day[meal];
   kensaDirty = true;
   renderKensaDirtyState();
+  var hasAny = !!(day.b || day.l || day.d);
+  if (!hasAny) delete kensa[ym][d];
   var partial = {};
   partial[ym] = {};
-  partial[ym][d] = kensa[ym][d];
+  // 空になった日は null を送り、サーバー側でも日ごと削除する（{} → [] 化を防ぐ）
+  partial[ym][d] = hasAny ? day : null;
   apiMerge('kensa', partial, 2);
 }
 
@@ -1912,6 +1948,8 @@ function saveKensaMonth() {
   if (btn.disabled) return;
   btn.disabled = true;
   var done = function() { btn.disabled = false; };
+  kensa = normalizeKensaData(kensa);
+  renderKensaGrid();
   var monthData = kensa[ym] || {};
   var partial = {};
   partial[ym] = monthData;
@@ -1924,7 +1962,7 @@ function saveKensaMonth() {
     // まずサーバーの最新の全データを取得し、この画面の月だけ差し替えて
     // ファイル全体をそのまま書き込む（サーバー側でのデータ再加工を挟まない）
     fetch(API_URL + '?key=kensa&t=' + Date.now()).then(function(r) { return r.json(); }).then(function(serverNow) {
-      var full = (serverNow && typeof serverNow === 'object' && !Array.isArray(serverNow)) ? serverNow : {};
+      var full = normalizeKensaData(serverNow);
       full[ym] = monthData;
       return fetch(API_URL + '?key=kensa', {
         method: 'POST',
@@ -1957,7 +1995,7 @@ function saveKensaMonth() {
           }
           if (detail.length === 0) {
             done();
-            kensa = serverKensa;
+            kensa = normalizeKensaData(serverKensa);
             kensaDirty = false;
             renderKensaDirtyState();
             statusEl.textContent = '登録しました（' + new Date().toLocaleTimeString('ja-JP') + '）サーバー保存確認済み';
