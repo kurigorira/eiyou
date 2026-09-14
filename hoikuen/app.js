@@ -14,6 +14,8 @@ var orders = {};
 var opHistory = [];
 var config = {};
 var hoikuConfirmed = {};
+var prices = {};
+var shifts = {};
 var toastTimer = null;
 var orderLocked = true;
 var orderDirty = false;
@@ -35,6 +37,8 @@ function loadData() {
     opHistory = d.hoiku_history || [];
     config = d.config || {};
     hoikuConfirmed = d.hoiku_confirmed || {};
+    prices = d.prices || {};
+    shifts = d.shifts || {};
   });
 }
 
@@ -150,6 +154,76 @@ function getStaffWithChildren() {
 
 function emptyMeal() { return {b:'',s1:'',l:'',s2:'',d:''}; }
 
+// ==================== 区分・料金・勤務区分 ====================
+var CHILD_CATEGORIES = [
+  {key:'zaien',  label:'在園児'},
+  {key:'gakudo', label:'学童'},
+  {key:'ichiji', label:'一時預'}
+];
+function categoryLabel(key) {
+  for (var i=0; i<CHILD_CATEGORIES.length; i++) {
+    if (CHILD_CATEGORIES[i].key === key) return CHILD_CATEGORIES[i].label;
+  }
+  return CHILD_CATEGORIES[0].label; // 未設定は在園児として扱う
+}
+function childCategory(c) { return (c && c.category) ? c.category : 'zaien'; }
+
+function getMealPrice(category, mealKey) {
+  var row = prices[category || 'zaien'];
+  var v = row ? row[mealKey] : 0;
+  v = parseInt(v, 10);
+  return isNaN(v) ? 0 : v;
+}
+function yen(n) { return Number(n || 0).toLocaleString('ja-JP') + '円'; }
+
+function getShift(staffId, y, m, d) {
+  var ym = y + '-' + pad(m);
+  if (!shifts[ym] || !shifts[ym][staffId]) return '';
+  return shifts[ym][staffId][d] || '';
+}
+
+// 子供1人の月間の食数と金額を集計する
+function childMonthCost(child, y, m) {
+  var days = daysInMonth(y, m);
+  var cat = childCategory(child);
+  var counts = {b:0,s1:0,l:0,s2:0,d:0};
+  var amount = 0;
+  for (var d=1; d<=days; d++) {
+    var o = getCountedOrder(child.id, y, m, d);
+    for (var k=0; k<MEAL_KEYS.length; k++) {
+      var mk = MEAL_KEYS[k];
+      if (o[mk]) { counts[mk]++; amount += getMealPrice(cat, mk); }
+    }
+  }
+  var total = 0;
+  for (var k=0; k<MEAL_KEYS.length; k++) total += counts[MEAL_KEYS[k]];
+  return {counts: counts, total: total, amount: amount, category: cat};
+}
+
+// 職員別（保護者別）の月間食事代
+function staffMonthCostRows(y, m) {
+  var byStaff = {};
+  for (var i=0; i<children.length; i++) {
+    var c = children[i];
+    var r = childMonthCost(c, y, m);
+    if (r.total === 0) continue;
+    if (!byStaff[c.staffId]) byStaff[c.staffId] = {staffId: c.staffId, kids: [], amount: 0, total: 0};
+    byStaff[c.staffId].kids.push({child: c, r: r});
+    byStaff[c.staffId].amount += r.amount;
+    byStaff[c.staffId].total  += r.total;
+  }
+  var ids = Object.keys(byStaff).sort();
+  var out = [];
+  for (var j=0; j<ids.length; j++) {
+    var s = getStaffById(ids[j]);
+    var e = byStaff[ids[j]];
+    e.staffName = s ? s.name : ids[j];
+    e.dept = s ? s.dept : '';
+    out.push(e);
+  }
+  return out;
+}
+
 // 集計用: 「確定」済みの注文だけを対象にする（未確定は0扱い）
 function getCountedOrder(childId, y, m, d) {
   if (!getOrderStatus(childId, y, m)) return emptyMeal();
@@ -205,11 +279,15 @@ function fetchAggregateData(fn) {
   var get = function(key) {
     return fetch(API_URL + '?key=' + key + '&t=' + Date.now()).then(function(r) { return r.json(); });
   };
-  Promise.all([get('hoiku_orders'), get('hoiku_confirmed')]).then(function(res) {
-    orders = res[0] || {};
-    hoikuConfirmed = res[1] || {};
-    fn();
-  }).catch(function() { fn(); });
+  Promise.all([get('hoiku_orders'), get('hoiku_confirmed'), get('prices'), get('shifts'), get('children')])
+    .then(function(res) {
+      orders = res[0] || {};
+      hoikuConfirmed = res[1] || {};
+      prices = res[2] || {};
+      shifts = res[3] || {};
+      children = res[4] || [];
+      fn();
+    }).catch(function() { fn(); });
 }
 function renderToday() {
   fetchAggregateData(renderTodayInner);
@@ -272,8 +350,11 @@ function initOrderTab() {
     if (defM > 12) { defM=1; defY++; }
     ySel.value = defY; mSel.value = defM;
   }
-  fetch(API_URL + '?key=config').then(function(r) { return r.json(); }).then(function(sc) {
-    config = sc || {};
+  var g = function(k) { return fetch(API_URL + '?key=' + k + '&t=' + Date.now()).then(function(r) { return r.json(); }); };
+  Promise.all([g('config'), g('shifts'), g('children')]).then(function(res) {
+    config = res[0] || {};
+    shifts = res[1] || {};
+    children = res[2] || [];
   }).catch(function(){}).then(function() {
     renderOrderLockNotice();
     setOrderControlsDisabled(isOrderInputBlocked());
@@ -336,7 +417,7 @@ function renderOrderGrid() {
   var days = daysInMonth(y, m);
   var todayStr = fmtDate(new Date());
   var disabledCls = orderLocked ? ' disabled' : '';
-  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜</th>';
+  var html = '<table class="order-table"><thead><tr><th>日</th><th>曜</th><th>保護者の勤務</th>';
   for (var k=0; k<MEAL_KEYS.length; k++) html += '<th>'+MEAL_NAMES[MEAL_KEYS[k]]+'</th>';
   html += '<th>備考</th></tr></thead><tbody>';
   var totals = {b:0,s1:0,l:0,s2:0,d:0};
@@ -348,7 +429,9 @@ function renderOrderGrid() {
     if (hName) cls='day-holiday'; else if (dow===0) cls='day-sun'; else if (dow===6) cls='day-sat';
     if (ds===todayStr) cls += ' day-today';
     var o = getOrder(childId, y, m, d);
+    var sh = getShift(staffId, y, m, d);
     html += '<tr class="'+cls+'"><td>'+d+'</td><td>'+WEEKDAYS[dow]+'</td>';
+    html += '<td style="font-size:0.75rem;white-space:nowrap">'+esc(sh)+'</td>';
     for (var k=0; k<MEAL_KEYS.length; k++) {
       var mk = MEAL_KEYS[k];
       var v = o[mk] || '';
@@ -622,6 +705,231 @@ function initReportTab() {
   }
 }
 
+
+
+// ==================== 全期間Excel出力（月ごとにシート） ====================
+// 注文データが存在する年月を古い順に返す
+function allOrderMonths() {
+  var list = [];
+  for (var ym in orders) {
+    if (/^\d{4}-\d{2}$/.test(ym)) list.push(ym);
+  }
+  return list.sort();
+}
+
+function exportHoikuAllExcel() {
+  var months = allOrderMonths();
+  if (months.length === 0) { showToast('注文データがありません'); return; }
+
+  var sheets = [];
+
+  // 1枚目: 全期間の職員別サマリー
+  var sum = {name:'全期間サマリー', rows:[], merges:[], cols:[10,14,14,10,12,14]};
+  var t0 = sum.rows.length + 1;
+  sum.rows.push([XC('保育園食 食事代 全期間サマリー', 3), XC('',3), XC('',3), XC('',3), XC('',3), XC('',3)]);
+  sum.merges.push('A'+t0+':F'+t0);
+  sum.rows.push([XC('対象期間: ' + months[0] + ' 〜 ' + months[months.length-1], 0)]);
+  sum.rows.push([]);
+  sum.rows.push([XC('職員ID',1), XC('氏名',1), XC('部署',1), XC('対象月数',1), XC('食数',1), XC('食事代',1)]);
+  var agg = {};
+  for (var i=0; i<months.length; i++) {
+    var ymp = months[i].split('-');
+    var rows = staffMonthCostRows(parseInt(ymp[0],10), parseInt(ymp[1],10));
+    for (var j=0; j<rows.length; j++) {
+      var e = rows[j];
+      if (!agg[e.staffId]) agg[e.staffId] = {name:e.staffName, dept:e.dept, total:0, amount:0, months:0};
+      agg[e.staffId].total  += e.total;
+      agg[e.staffId].amount += e.amount;
+      agg[e.staffId].months += 1;
+    }
+  }
+  var sids = Object.keys(agg).sort();
+  var gTotal = 0, gAmount = 0;
+  for (var i=0; i<sids.length; i++) {
+    var a = agg[sids[i]];
+    gTotal += a.total; gAmount += a.amount;
+    sum.rows.push([XC(sids[i],4), XC(a.name,4), XC(a.dept,4), XC(a.months,2), XC(a.total,2), XC(a.amount,3)]);
+  }
+  var totRow = sum.rows.length + 1;
+  sum.rows.push([XC('合計',1), XC('',1), XC('',1), XC('',1), XC(gTotal,3), XC(gAmount,3)]);
+  sum.merges.push('A'+totRow+':D'+totRow);
+  sheets.push(sum);
+
+  // 2枚目以降: 月ごとの明細
+  for (var i=0; i<months.length; i++) {
+    var ymp = months[i].split('-');
+    var y = parseInt(ymp[0],10), m = parseInt(ymp[1],10);
+    sheets.push(buildHoikuMonthSheet(y, m));
+  }
+
+  downloadXlsxBook(sheets, '保育園食_食事代集計_全期間.xlsx');
+  showToast(months.length + 'か月分をExcelに出力しました');
+}
+
+function buildHoikuMonthSheet(y, m) {
+  var days = daysInMonth(y, m);
+  var NM = MEAL_KEYS.length;
+  var sheet = {name: y+'年'+m+'月', rows:[], merges:[], cols:[]};
+  sheet.cols = [10, 14, 14, 14, 8];
+  for (var k=0; k<NM; k++) sheet.cols.push(7);
+  sheet.cols.push(7); sheet.cols.push(12);
+
+  var ncol = 5 + NM + 2;
+  var lastCol = xlsxColLetter(ncol - 1);
+  var tr = sheet.rows.length + 1;
+  var titleRow = [XC(y+'年'+m+'月 保育園食 食事代明細', 3)];
+  for (var c=1; c<ncol; c++) titleRow.push(XC('',3));
+  sheet.rows.push(titleRow);
+  sheet.merges.push('A'+tr+':'+lastCol+tr);
+
+  var hdr = [XC('職員ID',1), XC('氏名',1), XC('部署',1), XC('子供',1), XC('区分',1)];
+  for (var k=0; k<NM; k++) hdr.push(XC(MEAL_NAMES[MEAL_KEYS[k]],1));
+  hdr.push(XC('食数',1)); hdr.push(XC('食事代',1));
+  sheet.rows.push(hdr);
+
+  var rows = staffMonthCostRows(y, m);
+  var gTotal = 0, gAmount = 0;
+  for (var i=0; i<rows.length; i++) {
+    var e = rows[i];
+    gTotal += e.total; gAmount += e.amount;
+    for (var j=0; j<e.kids.length; j++) {
+      var kid = e.kids[j];
+      var row = [XC(e.staffId,4), XC(e.staffName,4), XC(e.dept,4),
+                 XC(kid.child.name,4), XC(categoryLabel(kid.r.category),2)];
+      for (var k=0; k<NM; k++) row.push(XC(kid.r.counts[MEAL_KEYS[k]],2));
+      row.push(XC(kid.r.total,2));
+      row.push(XC(kid.r.amount,3));
+      sheet.rows.push(row);
+    }
+  }
+  var totRow = sheet.rows.length + 1;
+  var foot = [XC('合計',1)];
+  for (var c=1; c<5+NM; c++) foot.push(XC('',1));
+  foot.push(XC(gTotal,3)); foot.push(XC(gAmount,3));
+  sheet.rows.push(foot);
+  sheet.merges.push('A'+totRow+':'+xlsxColLetter(4+NM)+totRow);
+
+  // 勤務区分（各日の各職員）
+  sheet.rows.push([]);
+  var sr = sheet.rows.length + 1;
+  var shTitle = [XC(y+'年'+m+'月 職員別 勤務区分', 3)];
+  for (var c=1; c<2+days; c++) shTitle.push(XC('',3));
+  sheet.rows.push(shTitle);
+  sheet.merges.push('A'+sr+':'+xlsxColLetter(1+days)+sr);
+
+  var ym = y + '-' + pad(m);
+  var month = shifts[ym] || {};
+  var idSet = {};
+  for (var i=0; i<rows.length; i++) idSet[rows[i].staffId] = true;
+  for (var sid in month) idSet[sid] = true;
+  var ids = Object.keys(idSet).sort();
+
+  var sh = [XC('職員ID',1), XC('氏名',1)];
+  for (var d=1; d<=days; d++) sh.push(XC(d, dayFillStyle(y,m,d,true)));
+  sheet.rows.push(sh);
+  if (ids.length === 0) {
+    sheet.rows.push([XC('勤務区分は取り込まれていません', 4)]);
+  } else {
+    for (var i=0; i<ids.length; i++) {
+      var st = getStaffById(ids[i]);
+      var r2 = [XC(ids[i],4), XC(st?st.name:'',4)];
+      for (var d=1; d<=days; d++) r2.push(XC(getShift(ids[i], y, m, d), dayFillStyle(y,m,d,false)));
+      sheet.rows.push(r2);
+    }
+  }
+  return sheet;
+}
+
+// ==================== 食事代・勤務区分セクション ====================
+function buildCostSection(y, m) {
+  var rows = staffMonthCostRows(y, m);
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 職員別 食事代</h3>';
+  var unset = true;
+  for (var i=0; i<CHILD_CATEGORIES.length; i++) {
+    for (var k=0; k<MEAL_KEYS.length; k++) {
+      if (getMealPrice(CHILD_CATEGORIES[i].key, MEAL_KEYS[k]) > 0) { unset = false; break; }
+    }
+  }
+  if (unset) {
+    html += '<p class="notice notice-warning">食事料金マスタが未設定のため金額が0円になります。'
+          + '職員給食システムの管理者モード →「保育園マスタ」タブで単価を設定してください。</p>';
+  }
+  if (rows.length === 0) {
+    html += '<p class="help-text">確定済みの注文がありません。</p></div>';
+    return html;
+  }
+  html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>';
+  html += '<th>職員ID</th><th>氏名</th><th>部署</th><th>子供</th><th>区分</th>';
+  for (var k=0; k<MEAL_KEYS.length; k++) html += '<th>'+MEAL_NAMES[MEAL_KEYS[k]]+'</th>';
+  html += '<th>食数</th><th>食事代</th></tr></thead><tbody>';
+  var grandAmount = 0, grandTotal = 0;
+  for (var i=0; i<rows.length; i++) {
+    var e = rows[i];
+    grandAmount += e.amount; grandTotal += e.total;
+    for (var j=0; j<e.kids.length; j++) {
+      var kid = e.kids[j];
+      html += '<tr>';
+      if (j === 0) {
+        html += '<td rowspan="'+e.kids.length+'">'+esc(e.staffId)+'</td>';
+        html += '<td rowspan="'+e.kids.length+'" style="white-space:nowrap">'+esc(e.staffName)+'</td>';
+        html += '<td rowspan="'+e.kids.length+'" style="white-space:nowrap">'+esc(e.dept)+'</td>';
+      }
+      html += '<td style="white-space:nowrap">'+esc(kid.child.name)+'</td>';
+      html += '<td>'+categoryLabel(kid.r.category)+'</td>';
+      for (var k=0; k<MEAL_KEYS.length; k++) html += '<td>'+kid.r.counts[MEAL_KEYS[k]]+'</td>';
+      html += '<td>'+kid.r.total+'</td><td style="text-align:right">'+yen(kid.r.amount)+'</td>';
+      html += '</tr>';
+      if (e.kids.length > 1 && j === e.kids.length - 1) {
+        html += '<tr><td colspan="'+(2+MEAL_KEYS.length)+'" style="text-align:right;font-weight:bold">'
+             +  esc(e.staffName)+' 合計</td>'
+             +  '<td style="font-weight:bold">'+e.total+'</td>'
+             +  '<td style="text-align:right;font-weight:bold">'+yen(e.amount)+'</td></tr>';
+      }
+    }
+  }
+  html += '</tbody><tfoot><tr><td colspan="'+(5+MEAL_KEYS.length)+'" style="text-align:right">総合計</td>'
+       +  '<td>'+grandTotal+'</td><td style="text-align:right">'+yen(grandAmount)+'</td></tr></tfoot>';
+  html += '</table></div></div>';
+  return html;
+}
+
+function buildShiftSection(y, m) {
+  var days = daysInMonth(y, m);
+  var ym = y + '-' + pad(m);
+  var month = shifts[ym] || {};
+  // 保護者として注文がある職員＋勤務区分が登録されている職員を対象にする
+  var idSet = {};
+  var rows = staffMonthCostRows(y, m);
+  for (var i=0; i<rows.length; i++) idSet[rows[i].staffId] = true;
+  for (var sid in month) idSet[sid] = true;
+  var ids = Object.keys(idSet).sort();
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 職員別 勤務区分</h3>';
+  if (ids.length === 0) {
+    html += '<p class="help-text">勤務区分が取り込まれていません。'
+         +  '職員給食システムの管理者モード →「保育園マスタ」タブで取り込んでください。</p></div>';
+    return html;
+  }
+  html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    var bg = getHolidayName(y+'-'+pad(m)+'-'+pad(d)) ? 'background:#fff8e1;'
+           : (dow===0 ? 'background:#fce4ec;' : (dow===6 ? 'background:#e8eaf6;' : ''));
+    html += '<th style="'+bg+'">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dow]+'</span></th>';
+  }
+  html += '</tr></thead><tbody>';
+  for (var i=0; i<ids.length; i++) {
+    var st = getStaffById(ids[i]);
+    html += '<tr><td>'+esc(ids[i])+'</td><td style="white-space:nowrap">'+esc(st?st.name:'')+'</td>';
+    for (var d=1; d<=days; d++) {
+      var v = getShift(ids[i], y, m, d);
+      html += '<td style="font-size:0.7rem;padding:2px">'+esc(v)+'</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
 function runReport() {
   fetchAggregateData(runReportInner);
 }
@@ -703,6 +1011,8 @@ function runReportInner() {
     html += '<td>'+dayTotal+'</td></tr>';
   }
   html += '</tbody></table></div>';
+  html += buildCostSection(y, m);
+  html += buildShiftSection(y, m);
   document.getElementById('rpt-result').innerHTML = html;
 }
 
@@ -779,6 +1089,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('order-edit').addEventListener('click', editOrder);
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
+    document.getElementById('rpt-all-excel').addEventListener('click', function(){ fetchAggregateData(exportHoikuAllExcel); });
     document.getElementById('rpt-print').addEventListener('click', function() { window.print(); });
 
     document.getElementById('hist-month-filter').addEventListener('change', renderHistory);

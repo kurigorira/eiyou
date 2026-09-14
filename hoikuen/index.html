@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20260733">
+<link rel="stylesheet" href="style.css?v=20260740">
 </head>
 <body>
 <div id="app">
@@ -110,6 +110,7 @@
           <select id="rpt-month"></select>月
         </label>
         <button class="btn" id="rpt-run">集計実行</button>
+        <button class="btn btn-outline" id="rpt-all-excel">全期間Excel出力（月別シート）</button>
         <button class="btn btn-outline" id="rpt-print">印刷</button>
       </div>
       <div id="rpt-result"></div>
@@ -138,6 +139,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="app.js?v=20260733"></script>
+<script src="../xlsx.js?v=20260740"></script>
+<script src="app.js?v=20260740"></script>
 </body>
 </html>

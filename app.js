@@ -37,6 +37,8 @@ var orders = {};
 var holidays = [];
 var opHistory = [];
 var children = [];
+var prices = {};
+var shifts = {};
 var config = {};
 var confirmed = {};
 var kensa = {};
@@ -58,6 +60,8 @@ function loadData() {
     holidays = d.holidays || [];
     opHistory = d.history || [];
     children = d.children || [];
+    prices = d.prices || {};
+    shifts = d.shifts || {};
     config = d.config || {};
     confirmed = d.confirmed || {};
     kensa = normalizeKensaData(d.kensa);
@@ -126,6 +130,38 @@ function waitForMergeIdle(key, cb, tries) {
 function saveHolidays() { apiSave('holidays', holidays); }
 function saveHistory() { apiSave('history', opHistory); }
 function saveChildren() { apiSave('children', children); }
+
+// ==================== 保育園マスタ（区分・料金・勤務区分） ====================
+var CHILD_CATEGORIES = [
+  {key:'zaien',  label:'在園児'},
+  {key:'gakudo', label:'学童'},
+  {key:'ichiji', label:'一時預'}
+];
+var HOIKU_MEAL_KEYS  = ['b','s1','l','s2','d'];
+var HOIKU_MEAL_NAMES = {b:'朝食', s1:'10時おやつ', l:'昼食', s2:'15時おやつ', d:'夕食'};
+
+function categoryLabel(key) {
+  for (var i=0; i<CHILD_CATEGORIES.length; i++) {
+    if (CHILD_CATEGORIES[i].key === key) return CHILD_CATEGORIES[i].label;
+  }
+  return CHILD_CATEGORIES[0].label; // 未設定の子供は在園児として扱う
+}
+function childCategory(c) { return (c && c.category) ? c.category : 'zaien'; }
+
+function getMealPrice(category, mealKey) {
+  var row = prices[category || 'zaien'];
+  var v = row ? row[mealKey] : 0;
+  v = parseInt(v, 10);
+  return isNaN(v) ? 0 : v;
+}
+function yen(n) { return Number(n || 0).toLocaleString('ja-JP') + '円'; }
+
+function getShift(staffId, y, m, d) {
+  var ym = y + '-' + pad(m);
+  if (!shifts[ym] || !shifts[ym][staffId]) return '';
+  return shifts[ym][staffId][d] || '';
+}
+
 function saveConfig() { apiSave('config', config); }
 function saveConfirmed() { apiSave('confirmed', confirmed); }
 function saveKensa() { apiSave('kensa', kensa); }
@@ -291,6 +327,7 @@ function showTab(name) {
   if (name==='history') renderHistory();
   if (name==='holiday') renderHolidayList();
   if (name==='kensa') initKensaTab();
+  if (name==='hoikumaster') initHoikuMasterTab();
   if (name==='backup') initBackupTab();
 }
 
@@ -1450,183 +1487,6 @@ function fetchAggregateData(fn) {
 
 function fetchOrdersThen(fn) { fetchAggregateData(fn); }
 
-// ===== 本物のXLSX(OpenXML)を生成（外部ライブラリ不要・オフライン動作） =====
-// スタイル索引: 0=既定 1=見出し 2=中央罫線 3=太字合計 4=左寄せ罫線
-//   5=土曜 6=日曜 7=祝日 8=土見出し 9=日見出し 10=祝見出し 11=タイトル左 12=タイトル中央
-function xlsxColLetter(n) {
-  var s = ''; n = n + 1;
-  while (n > 0) { var r = (n-1) % 26; s = String.fromCharCode(65+r) + s; n = Math.floor((n-1)/26); }
-  return s;
-}
-function xmlEsc(v) {
-  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function XC(v, s) { return {v: v, s: s || 0}; }
-function XF(formula, s) { return {f: formula, s: s || 0}; }
-function xlsxCellXml(rowNum, colIdx, cell) {
-  var ref = xlsxColLetter(colIdx) + rowNum;
-  var s = cell.s || 0;
-  if (cell.f) return '<c r="'+ref+'" s="'+s+'"><f>'+xmlEsc(cell.f)+'</f></c>';
-  if (cell.v === '' || cell.v === null || cell.v === undefined) return '<c r="'+ref+'" s="'+s+'"/>';
-  if (typeof cell.v === 'number') return '<c r="'+ref+'" s="'+s+'"><v>'+cell.v+'</v></c>';
-  return '<c r="'+ref+'" s="'+s+'" t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(cell.v)+'</t></is></c>';
-}
-function xlsxSheetXml(sheet) {
-  var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
-  xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
-  if (sheet.cols && sheet.cols.length) {
-    xml += '<cols>';
-    for (var i=0; i<sheet.cols.length; i++) xml += '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+sheet.cols[i]+'" customWidth="1"/>';
-    xml += '</cols>';
-  }
-  xml += '<sheetData>';
-  for (var r=0; r<sheet.rows.length; r++) {
-    var row = sheet.rows[r];
-    xml += '<row r="'+(r+1)+'">';
-    for (var c=0; c<row.length; c++) {
-      if (row[c] === null || row[c] === undefined) continue;
-      xml += xlsxCellXml(r+1, c, row[c]);
-    }
-    xml += '</row>';
-  }
-  xml += '</sheetData>';
-  if (sheet.merges && sheet.merges.length) {
-    xml += '<mergeCells count="'+sheet.merges.length+'">';
-    for (var i=0; i<sheet.merges.length; i++) xml += '<mergeCell ref="'+sheet.merges[i]+'"/>';
-    xml += '</mergeCells>';
-  }
-  xml += '</worksheet>';
-  return xml;
-}
-function xlsxStylesXml() {
-  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-  + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-  + '<fonts count="3">'
-  + '<font><sz val="11"/><name val="ＭＳ Ｐゴシック"/></font>'
-  + '<font><b/><sz val="11"/><name val="ＭＳ Ｐゴシック"/></font>'
-  + '<font><b/><sz val="14"/><name val="ＭＳ Ｐゴシック"/></font>'
-  + '</fonts>'
-  + '<fills count="6">'
-  + '<fill><patternFill patternType="none"/></fill>'
-  + '<fill><patternFill patternType="gray125"/></fill>'
-  + '<fill><patternFill patternType="solid"><fgColor rgb="FFF0F0F0"/><bgColor indexed="64"/></patternFill></fill>'
-  + '<fill><patternFill patternType="solid"><fgColor rgb="FFE8EAF6"/><bgColor indexed="64"/></patternFill></fill>'
-  + '<fill><patternFill patternType="solid"><fgColor rgb="FFFCE4EC"/><bgColor indexed="64"/></patternFill></fill>'
-  + '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF8E1"/><bgColor indexed="64"/></patternFill></fill>'
-  + '</fills>'
-  + '<borders count="2">'
-  + '<border><left/><right/><top/><bottom/><diagonal/></border>'
-  + '<border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border>'
-  + '</borders>'
-  + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-  + '<cellXfs count="13">'
-  + '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-  + '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
-  + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
-  + '</cellXfs>'
-  + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
-  + '</styleSheet>';
-}
-function xlsxSanitizeName(name) {
-  var n = String(name).replace(/[\[\]\*\?\/\\:]/g, '');
-  return n.length > 31 ? n.slice(0, 31) : (n || 'Sheet1');
-}
-function crc32(bytes) {
-  var table = crc32._t;
-  if (!table) {
-    table = crc32._t = [];
-    for (var n=0; n<256; n++) { var c=n; for (var k=0;k<8;k++) c = (c&1)?(0xEDB88320^(c>>>1)):(c>>>1); table[n]=c>>>0; }
-  }
-  var crc = 0xFFFFFFFF;
-  for (var i=0; i<bytes.length; i++) crc = (crc>>>8) ^ table[(crc ^ bytes[i]) & 0xFF];
-  return (crc ^ 0xFFFFFFFF) >>> 0;
-}
-function zipStore(files) {
-  var enc = new TextEncoder();
-  function u16(n){ return [n&0xFF,(n>>>8)&0xFF]; }
-  function u32(n){ return [n&0xFF,(n>>>8)&0xFF,(n>>>16)&0xFF,(n>>>24)&0xFF]; }
-  var parts = [], central = [], offset = 0;
-  for (var i=0; i<files.length; i++) {
-    var nameBytes = enc.encode(files[i].name);
-    var data = files[i].data;
-    var crc = crc32(data);
-    var local = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
-      u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0));
-    parts.push(new Uint8Array(local)); parts.push(nameBytes); parts.push(data);
-    var cen = [].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
-      u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset));
-    central.push(new Uint8Array(cen)); central.push(nameBytes);
-    offset += local.length + nameBytes.length + data.length;
-  }
-  var centralStart = offset, centralSize = 0;
-  for (var i=0; i<central.length; i++) centralSize += central[i].length;
-  var end = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
-    u32(centralSize), u32(centralStart), u16(0)));
-  var all = parts.concat(central).concat([end]);
-  var total = 0; for (var i=0; i<all.length; i++) total += all[i].length;
-  var out = new Uint8Array(total), p = 0;
-  for (var i=0; i<all.length; i++) { out.set(all[i], p); p += all[i].length; }
-  return out;
-}
-function downloadXlsx(sheet, filename) {
-  var enc = new TextEncoder();
-  var name = xlsxSanitizeName(sheet.name);
-  var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-    + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-    + '<Default Extension="xml" ContentType="application/xml"/>'
-    + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-    + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-    + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-    + '</Types>';
-  var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-    + '</Relationships>';
-  var workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-    + '<sheets><sheet name="'+xmlEsc(name)+'" sheetId="1" r:id="rId1"/></sheets></workbook>';
-  var workbookRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-    + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-    + '</Relationships>';
-  var files = [
-    {name:'[Content_Types].xml', data: enc.encode(contentTypes)},
-    {name:'_rels/.rels', data: enc.encode(rootRels)},
-    {name:'xl/workbook.xml', data: enc.encode(workbook)},
-    {name:'xl/_rels/workbook.xml.rels', data: enc.encode(workbookRels)},
-    {name:'xl/styles.xml', data: enc.encode(xlsxStylesXml())},
-    {name:'xl/worksheets/sheet1.xml', data: enc.encode(xlsxSheetXml(sheet))}
-  ];
-  var zip = zipStore(files);
-  var blob = new Blob([zip], {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-// 日ごとの塗り分けスタイル索引（通常=2, 土=5, 日=6, 祝=7 / 見出しは +3 相当を別途）
-function dayFillStyle(y, m, d, isHeader) {
-  var dow = dayOfWeek(y, m, d);
-  var hol = getHolidayName(y+'-'+pad(m)+'-'+pad(d));
-  if (isHeader) {
-    if (hol) return 10; if (dow===0) return 9; if (dow===6) return 8; return 1;
-  }
-  if (hol) return 7; if (dow===0) return 6; if (dow===6) return 5; return 2;
-}
-
 function exportSoumuExcel() {
   fetchOrdersThen(function() {
     var y = parseInt(document.getElementById('rpt-year').value);
@@ -2523,10 +2383,27 @@ function renderChildList() {
     var s = getStaffById(c.staffId);
     var pName = s ? s.name+'('+c.staffId+')' : c.staffId;
     html += '<tr><td>'+esc(c.name)+'</td><td>'+esc(pName)+'</td>';
+    html += '<td><select class="child-cat" data-id="'+esc(c.id)+'">';
+    for (var k=0; k<CHILD_CATEGORIES.length; k++) {
+      var cat = CHILD_CATEGORIES[k];
+      html += '<option value="'+cat.key+'"'+(childCategory(c)===cat.key?' selected':'')+'>'+cat.label+'</option>';
+    }
+    html += '</select></td>';
     html += '<td><button class="btn-del" onclick="deleteChild(\''+esc(c.id)+'\')">削除</button></td></tr>';
   }
-  if (!html) html = '<tr><td colspan="3" style="text-align:center;color:#999">子供の登録なし</td></tr>';
+  if (!html) html = '<tr><td colspan="4" style="text-align:center;color:#999">子供の登録なし</td></tr>';
   tb.innerHTML = html;
+  var sels = tb.querySelectorAll('select.child-cat');
+  for (var i=0; i<sels.length; i++) {
+    sels[i].addEventListener('change', function() {
+      var cid = this.getAttribute('data-id');
+      for (var j=0; j<children.length; j++) {
+        if (children[j].id === cid) { children[j].category = this.value; break; }
+      }
+      saveChildren();
+      showToast('区分を変更しました');
+    });
+  }
 }
 
 function submitChild(e) {
@@ -2536,7 +2413,8 @@ function submitChild(e) {
   var name = document.getElementById('cf-name').value.trim();
   if (!name) return;
   var id = 'C' + Date.now();
-  children.push({id: id, staffId: staffId, name: name});
+  var category = document.getElementById('cf-category').value || 'zaien';
+  children.push({id: id, staffId: staffId, name: name, category: category});
   saveChildren();
   document.getElementById('cf-name').value = '';
   renderChildList();
@@ -2554,6 +2432,240 @@ function deleteChild(childId) {
   renderChildList();
   renderStaffList();
   showToast('削除しました');
+}
+
+
+// ==================== 保育園マスタ画面 ====================
+function initHoikuMasterTab() {
+  var ySel = document.getElementById('shift-year');
+  var mSel = document.getElementById('shift-month');
+  if (ySel && ySel.options.length === 0) {
+    var now = new Date();
+    for (var y=now.getFullYear()-1; y<=now.getFullYear()+2; y++) {
+      var o = document.createElement('option'); o.value=y; o.textContent=y; ySel.appendChild(o);
+    }
+    for (var m=1; m<=12; m++) {
+      var o2 = document.createElement('option'); o2.value=m; o2.textContent=m; mSel.appendChild(o2);
+    }
+    ySel.value = now.getFullYear(); mSel.value = now.getMonth()+1;
+  }
+  var get = function(key) {
+    return fetch(API_URL + '?key=' + key + '&t=' + Date.now()).then(function(r) { return r.json(); });
+  };
+  Promise.all([get('prices'), get('shifts')]).then(function(res) {
+    prices = res[0] || {};
+    shifts = res[1] || {};
+  }).catch(function(){}).then(function() {
+    renderPriceTable();
+    renderShiftPreview();
+  });
+}
+
+function renderPriceTable() {
+  var tb = document.getElementById('price-table');
+  if (!tb) return;
+  var html = '';
+  for (var i=0; i<CHILD_CATEGORIES.length; i++) {
+    var cat = CHILD_CATEGORIES[i];
+    html += '<tr><td>'+cat.label+'</td>';
+    for (var k=0; k<HOIKU_MEAL_KEYS.length; k++) {
+      var mk = HOIKU_MEAL_KEYS[k];
+      html += '<td><input type="number" min="0" step="10" style="width:90px" ' +
+              'class="price-input" data-cat="'+cat.key+'" data-meal="'+mk+'" ' +
+              'value="'+getMealPrice(cat.key, mk)+'"></td>';
+    }
+    html += '</tr>';
+  }
+  tb.innerHTML = html;
+}
+
+function savePrices() {
+  var inputs = document.querySelectorAll('#price-table input.price-input');
+  var next = {};
+  for (var i=0; i<CHILD_CATEGORIES.length; i++) next[CHILD_CATEGORIES[i].key] = {};
+  for (var i=0; i<inputs.length; i++) {
+    var cat = inputs[i].getAttribute('data-cat');
+    var mk = inputs[i].getAttribute('data-meal');
+    var v = parseInt(inputs[i].value, 10);
+    next[cat][mk] = isNaN(v) || v < 0 ? 0 : v;
+  }
+  var statusEl = document.getElementById('price-status');
+  statusEl.textContent = '保存中...';
+  fetch(API_URL + '?key=prices', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(next)
+  }).then(function(r) { return r.json(); }).then(function(res) {
+    if (!res || !res.ok) {
+      statusEl.textContent = '保存に失敗しました';
+      alert('料金の保存に失敗しました: ' + ((res && res.error) || '不明なエラー'));
+      return;
+    }
+    prices = next;
+    statusEl.textContent = '保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）';
+    showToast('食事料金を保存しました');
+  }).catch(function(e) {
+    statusEl.textContent = '保存に失敗しました';
+    alert('料金の保存に失敗しました（通信エラー）: ' + e.message);
+  });
+}
+
+// 勤務区分を月単位でサーバーへ保存する
+function saveShiftsForMonth(ym, monthData, onDone) {
+  var partial = {};
+  partial[ym] = monthData;
+  fetch(API_URL + '?key=shifts&action=merge', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(partial)
+  }).then(function(r) { return r.json(); }).then(function(res) {
+    if (!res || !res.ok) { onDone((res && res.error) || '不明なエラー'); return; }
+    shifts[ym] = monthData;
+    onDone(null);
+  }).catch(function(e) { onDone('通信エラー: ' + e.message); });
+}
+
+function syncShiftsFromDb() {
+  var y = parseInt(document.getElementById('shift-year').value);
+  var m = parseInt(document.getElementById('shift-month').value);
+  var statusEl = document.getElementById('shift-status');
+  statusEl.style.color = '';
+  statusEl.textContent = 'データベースから取得中...';
+  fetch('sync_shifts.php?year=' + y + '&month=' + m + '&t=' + Date.now())
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res || !res.ok) {
+        statusEl.style.color = '#dc3545';
+        statusEl.textContent = '同期できませんでした: ' + ((res && res.error) || '不明なエラー');
+        alert('勤務区分の同期に失敗しました。\n\n' + ((res && res.error) || '不明なエラー') +
+              '\n\nsync_shifts.php の接続設定が未入力の場合は、CSV取込をご利用ください。');
+        return;
+      }
+      var ym = y + '-' + pad(m);
+      saveShiftsForMonth(ym, res.shifts || {}, function(err) {
+        if (err) { statusEl.style.color = '#dc3545'; statusEl.textContent = '保存に失敗: ' + err; return; }
+        statusEl.style.color = '';
+        statusEl.textContent = y+'年'+m+'月の勤務区分を同期しました（' + (res.count || 0) + '件）';
+        showToast('勤務区分を同期しました');
+        renderShiftPreview();
+      });
+    })
+    .catch(function(e) {
+      statusEl.style.color = '#dc3545';
+      statusEl.textContent = '同期できませんでした（sync_shifts.php が見つからない可能性があります）';
+      alert('勤務区分の同期に失敗しました: ' + e.message +
+            '\n\nサーバーに sync_shifts.php が配置され、接続設定が済んでいるか確認してください。\n' +
+            '設定が済むまではCSV取込をご利用ください。');
+    });
+}
+
+function importShiftCsv() {
+  var f = document.getElementById('shift-csv-file').files[0];
+  var statusEl = document.getElementById('shift-status');
+  if (!f) { showToast('CSVファイルを選択してください'); return; }
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var text = String(ev.target.result || '').replace(/^\uFEFF/, '');
+    var lines = text.split(/\r?\n/);
+    var byMonth = {}, n = 0, skipped = 0;
+    for (var i=0; i<lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+      var cols = line.split(',').map(function(x) { return x.trim().replace(/^"|"$/g, ''); });
+      if (cols.length < 3) { skipped++; continue; }
+      var sid = cols[0], dateStr = cols[1], kubun = cols[2];
+      var md = /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/.exec(dateStr);
+      if (!md || !sid || !kubun) { skipped++; continue; }   // ヘッダ行などは読み飛ばす
+      var ym = md[1] + '-' + pad(parseInt(md[2],10));
+      var day = String(parseInt(md[3],10));
+      if (!byMonth[ym]) byMonth[ym] = {};
+      if (!byMonth[ym][sid]) byMonth[ym][sid] = {};
+      byMonth[ym][sid][day] = kubun;
+      n++;
+    }
+    if (n === 0) {
+      statusEl.style.color = '#dc3545';
+      statusEl.textContent = '取り込める行がありませんでした（形式: 職員ID,日付,勤務区分）';
+      return;
+    }
+    var months = Object.keys(byMonth);
+    var done = 0, errs = [];
+    statusEl.style.color = '';
+    statusEl.textContent = '取込中...';
+    months.forEach(function(ym) {
+      var merged = {};
+      var existing = shifts[ym] || {};
+      for (var sid in existing) { merged[sid] = {}; for (var dd in existing[sid]) merged[sid][dd] = existing[sid][dd]; }
+      for (var sid2 in byMonth[ym]) {
+        if (!merged[sid2]) merged[sid2] = {};
+        for (var dd2 in byMonth[ym][sid2]) merged[sid2][dd2] = byMonth[ym][sid2][dd2];
+      }
+      saveShiftsForMonth(ym, merged, function(err) {
+        if (err) errs.push(ym + ': ' + err);
+        done++;
+        if (done === months.length) {
+          if (errs.length) {
+            statusEl.style.color = '#dc3545';
+            statusEl.textContent = '一部保存に失敗: ' + errs.join(' / ');
+          } else {
+            statusEl.style.color = '';
+            statusEl.textContent = n + '件を取り込みました（対象月: ' + months.join('、') + '）' +
+                                   (skipped ? ' ／ 読み飛ばし ' + skipped + '行' : '');
+            showToast('勤務区分を取り込みました');
+          }
+          renderShiftPreview();
+        }
+      });
+    });
+  };
+  reader.readAsText(f, 'UTF-8');
+}
+
+function exportShiftCsv() {
+  var y = parseInt(document.getElementById('shift-year').value);
+  var m = parseInt(document.getElementById('shift-month').value);
+  var ym = y + '-' + pad(m);
+  var month = shifts[ym] || {};
+  var csv = '\uFEFF職員ID,氏名,日付,勤務区分\n';
+  var days = daysInMonth(y, m);
+  var ids = Object.keys(month).sort();
+  for (var i=0; i<ids.length; i++) {
+    var st = getStaffById(ids[i]);
+    for (var d=1; d<=days; d++) {
+      var v = month[ids[i]][d];
+      if (!v) continue;
+      csv += '"'+ids[i]+'","'+(st?st.name:'')+'","'+y+'-'+pad(m)+'-'+pad(d)+'","'+String(v).replace(/"/g,'""')+'"\n';
+    }
+  }
+  downloadFile(csv, '勤務区分_'+y+'年'+pad(m)+'月.csv', 'text/csv;charset=utf-8');
+  showToast('勤務区分CSVを出力しました');
+}
+
+function renderShiftPreview() {
+  var wrap = document.getElementById('shift-preview');
+  if (!wrap) return;
+  var y = parseInt(document.getElementById('shift-year').value);
+  var m = parseInt(document.getElementById('shift-month').value);
+  var ym = y + '-' + pad(m);
+  var month = shifts[ym] || {};
+  var ids = Object.keys(month).sort();
+  if (ids.length === 0) {
+    wrap.innerHTML = '<p class="help-text">'+y+'年'+m+'月の勤務区分はまだ取り込まれていません。</p>';
+    return;
+  }
+  var days = daysInMonth(y, m);
+  var html = '<p class="help-text">'+y+'年'+m+'月の勤務区分（'+ids.length+'名）</p>';
+  html += '<table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th>';
+  for (var d=1; d<=days; d++) html += '<th>'+d+'</th>';
+  html += '</tr></thead><tbody>';
+  for (var i=0; i<ids.length; i++) {
+    var st = getStaffById(ids[i]);
+    html += '<tr><td>'+esc(ids[i])+'</td><td style="white-space:nowrap">'+esc(st?st.name:'')+'</td>';
+    for (var d=1; d<=days; d++) html += '<td style="font-size:0.7rem">'+esc(month[ids[i]][d]||'')+'</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
 }
 
 // ==================== DATA MANAGEMENT ====================
@@ -2751,6 +2863,13 @@ document.addEventListener('DOMContentLoaded', function() {
     renderIdModeStatus();
     renderLockStatus();
     renderOrderLockNotice();
+
+    document.getElementById('price-save').addEventListener('click', savePrices);
+    document.getElementById('shift-sync').addEventListener('click', syncShiftsFromDb);
+    document.getElementById('shift-csv-import').addEventListener('click', importShiftCsv);
+    document.getElementById('shift-csv-export').addEventListener('click', exportShiftCsv);
+    document.getElementById('shift-year').addEventListener('change', renderShiftPreview);
+    document.getElementById('shift-month').addEventListener('change', renderShiftPreview);
 
     document.getElementById('data-export').addEventListener('click', dataExport);
     document.getElementById('data-import').addEventListener('click', dataImport);
