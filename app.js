@@ -37,8 +37,6 @@ var orders = {};
 var holidays = [];
 var opHistory = [];
 var children = [];
-var prices = {};
-var shifts = {};
 var config = {};
 var confirmed = {};
 var kensa = {};
@@ -60,8 +58,6 @@ function loadData() {
     holidays = d.holidays || [];
     opHistory = d.history || [];
     children = d.children || [];
-    prices = d.prices || {};
-    shifts = d.shifts || {};
     config = d.config || {};
     confirmed = d.confirmed || {};
     kensa = normalizeKensaData(d.kensa);
@@ -131,139 +127,6 @@ function saveHolidays() { apiSave('holidays', holidays); }
 function saveHistory() { apiSave('history', opHistory); }
 function saveChildren() { apiSave('children', children); }
 
-// ==================== 保育園マスタ（区分・料金・勤務区分） ====================
-var CHILD_CATEGORIES = [
-  {key:'zaien',  label:'在園児'},
-  {key:'gakudo', label:'学童'},
-  {key:'ichiji', label:'一時預'}
-];
-var HOIKU_MEAL_KEYS  = ['b','s1','l','s2','d'];
-var HOIKU_MEAL_NAMES = {b:'朝食', s1:'10時おやつ', l:'昼食', s2:'15時おやつ', d:'夕食'};
-
-function categoryLabel(key) {
-  for (var i=0; i<CHILD_CATEGORIES.length; i++) {
-    if (CHILD_CATEGORIES[i].key === key) return CHILD_CATEGORIES[i].label;
-  }
-  return CHILD_CATEGORIES[0].label; // 未設定の子供は在園児として扱う
-}
-function childCategory(c) { return (c && c.category) ? c.category : 'zaien'; }
-
-function getMealPrice(category, mealKey) {
-  var row = prices[category || 'zaien'];
-  var v = row ? row[mealKey] : 0;
-  v = parseInt(v, 10);
-  return isNaN(v) ? 0 : v;
-}
-function yen(n) { return Number(n || 0).toLocaleString('ja-JP') + '円'; }
-
-function getShift(staffId, y, m, d) {
-  var ym = y + '-' + pad(m);
-  if (!shifts[ym] || !shifts[ym][staffId]) return '';
-  return shifts[ym][staffId][d] || '';
-}
-
-function saveConfig() { apiSave('config', config); }
-function saveConfirmed() { apiSave('confirmed', confirmed); }
-function saveKensa() { apiSave('kensa', kensa); }
-
-function getChildrenByStaff(staffId) {
-  return children.filter(function(c) { return c.staffId === staffId; });
-}
-
-function addHistory(staffId, yearMonth, action, detail) {
-  var s = getStaffById(staffId);
-  var name = s ? s.name : staffId;
-  opHistory.unshift({
-    timestamp: new Date().toLocaleString('ja-JP'),
-    staffId: staffId,
-    staffName: name,
-    yearMonth: yearMonth,
-    action: action,
-    detail: detail || ''
-  });
-  if (opHistory.length > 2000) opHistory = opHistory.slice(0, 2000);
-  saveHistory();
-}
-
-function showToast(msg) {
-  var el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.add('show');
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(function() { el.classList.remove('show'); }, 2000);
-}
-
-function pad(n) { return n < 10 ? '0' + n : '' + n; }
-function fmtDate(d) { return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
-function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
-function dayOfWeek(y, m, d) { return new Date(y, m-1, d).getDay(); }
-function isWeekend(y, m, d) { var dow = dayOfWeek(y,m,d); return dow===0||dow===6; }
-function getHolidayName(dateStr) {
-  for (var i=0; i<holidays.length; i++) { if(holidays[i].date===dateStr) return holidays[i].name; }
-  return null;
-}
-function isHoliday(dateStr) { return getHolidayName(dateStr) !== null; }
-function isWorkday(y, m, d) {
-  var ds = y+'-'+pad(m)+'-'+pad(d);
-  return !isWeekend(y,m,d) && !isHoliday(ds);
-}
-
-function getStaffById(id) {
-  for (var i=0; i<staffList.length; i++) { if(staffList[i].id===id) return staffList[i]; }
-  return null;
-}
-function getDepartments() {
-  var deps = {};
-  for (var i=0; i<staffList.length; i++) deps[staffList[i].dept] = true;
-  return Object.keys(deps).sort();
-}
-function getStaffSorted() {
-  return staffList.slice().sort(function(a,b) {
-    if (a.dept < b.dept) return -1; if (a.dept > b.dept) return 1;
-    if (a.id < b.id) return -1; if (a.id > b.id) return 1; return 0;
-  });
-}
-
-var orderLocked = true;
-var orderDirty = false;
-
-function getOrderStatus(staffId, y, m) {
-  var sKey = y+'-'+pad(m)+'_'+staffId;
-  return confirmed[sKey] === true;
-}
-function setOrderConfirmed(staffId, y, m, val) {
-  var sKey = y+'-'+pad(m)+'_'+staffId;
-  if (val) confirmed[sKey] = true; else delete confirmed[sKey];
-  var partial = {};
-  partial[sKey] = val ? true : null;
-  apiMerge('confirmed', partial);
-}
-
-function emptyMeal() { return {b:false,l:false,d:false,dd:false}; }
-
-// 集計用: 「確定」済みの注文だけを対象にする（未確定は0扱い）
-function getCountedOrder(staffId, y, m, d) {
-  if (!getOrderStatus(staffId, y, m)) return emptyMeal();
-  return getOrder(staffId, y, m, d);
-}
-
-// 未確定のまま入力がある職員の一覧（集計に含まれないもの）
-function getUnconfirmedStaff(y, m) {
-  var days = daysInMonth(y, m);
-  var sorted = getStaffSorted();
-  var out = [];
-  for (var i=0; i<sorted.length; i++) {
-    var s = sorted[i];
-    if (getOrderStatus(s.id, y, m)) continue;
-    var n = 0;
-    for (var d=1; d<=days; d++) {
-      var o = getOrder(s.id, y, m, d);
-      if (o.b) n++; if (o.l) n++; if (o.d) n++; if (o.dd) n++;
-    }
-    if (n > 0) out.push({staff:s, count:n});
-  }
-  return out;
-}
 function getOrder(staffId, y, m, d) {
   var key = y+'-'+pad(m);
   if (!orders[key] || !orders[key][staffId] || !orders[key][staffId][d]) return emptyMeal();
@@ -321,13 +184,12 @@ function showTab(name) {
   var btn = document.querySelector('[data-tab="'+name+'"]');
   if (btn) btn.classList.add('active');
   if (name==='today') renderToday();
-  if (name==='staff') { renderStaffList(); populateDeptSelect(); populateChildStaff(); renderChildList(); }
+  if (name==='staff') { renderStaffList(); populateDeptSelect(); }
   if (name==='order') initOrderTab();
   if (name==='report') initReportTab();
   if (name==='history') renderHistory();
   if (name==='holiday') renderHolidayList();
   if (name==='kensa') initKensaTab();
-  if (name==='hoikumaster') initHoikuMasterTab();
   if (name==='backup') initBackupTab();
 }
 
@@ -2342,331 +2204,10 @@ function initHolidays() {
 }
 
 // ==================== CHILDREN MANAGEMENT ====================
-function populateChildStaff() {
-  var sel = document.getElementById('child-staff');
-  var cur = sel.value;
-  var search = (document.getElementById('child-staff-search').value || '').toLowerCase().trim();
-  sel.innerHTML = '<option value="">-- 選択 --</option>';
-  var sorted = getStaffSorted();
-  var firstMatchId = '';
-  var exactMatchId = '';
-  var matchCount = 0;
-  for (var i=0; i<sorted.length; i++) {
-    var s = sorted[i];
-    if (search && s.id.toLowerCase().indexOf(search)===-1 && s.name.toLowerCase().indexOf(search)===-1 && s.dept.toLowerCase().indexOf(search)===-1) continue;
-    var o = document.createElement('option');
-    o.value = s.id;
-    o.textContent = s.id + ' ' + s.name + '（' + s.dept + '）';
-    sel.appendChild(o);
-    matchCount++;
-    if (!firstMatchId) firstMatchId = s.id;
-    if (search && s.id.toLowerCase() === search) exactMatchId = s.id;
-  }
-  if (exactMatchId) {
-    sel.value = exactMatchId;
-  } else if (cur && matchCount > 0 && sel.querySelector('option[value="'+CSS.escape(cur)+'"]')) {
-    sel.value = cur;
-  } else if (search && matchCount === 1) {
-    sel.value = firstMatchId;
-  }
-}
-
-function renderChildList() {
-  var tb = document.getElementById('child-list');
-  var html = '';
-  var sorted = children.slice().sort(function(a,b) {
-    if (a.staffId < b.staffId) return -1; if (a.staffId > b.staffId) return 1;
-    return 0;
-  });
-  for (var i=0; i<sorted.length; i++) {
-    var c = sorted[i];
-    var s = getStaffById(c.staffId);
-    var pName = s ? s.name+'('+c.staffId+')' : c.staffId;
-    html += '<tr><td>'+esc(c.name)+'</td><td>'+esc(pName)+'</td>';
-    html += '<td><select class="child-cat" data-id="'+esc(c.id)+'">';
-    for (var k=0; k<CHILD_CATEGORIES.length; k++) {
-      var cat = CHILD_CATEGORIES[k];
-      html += '<option value="'+cat.key+'"'+(childCategory(c)===cat.key?' selected':'')+'>'+cat.label+'</option>';
-    }
-    html += '</select></td>';
-    html += '<td><button class="btn-del" onclick="deleteChild(\''+esc(c.id)+'\')">削除</button></td></tr>';
-  }
-  if (!html) html = '<tr><td colspan="4" style="text-align:center;color:#999">子供の登録なし</td></tr>';
-  tb.innerHTML = html;
-  var sels = tb.querySelectorAll('select.child-cat');
-  for (var i=0; i<sels.length; i++) {
-    sels[i].addEventListener('change', function() {
-      var cid = this.getAttribute('data-id');
-      for (var j=0; j<children.length; j++) {
-        if (children[j].id === cid) { children[j].category = this.value; break; }
-      }
-      saveChildren();
-      showToast('区分を変更しました');
-    });
-  }
-}
-
-function submitChild(e) {
-  e.preventDefault();
-  var staffId = document.getElementById('child-staff').value;
-  if (!staffId) { showToast('職員を選択してください'); return; }
-  var name = document.getElementById('cf-name').value.trim();
-  if (!name) return;
-  var id = 'C' + Date.now();
-  var category = document.getElementById('cf-category').value || 'zaien';
-  children.push({id: id, staffId: staffId, name: name, category: category});
-  saveChildren();
-  document.getElementById('cf-name').value = '';
-  renderChildList();
-  renderStaffList();
-  showToast(name + 'を登録しました');
-}
-
-function deleteChild(childId) {
-  var c = null;
-  for (var i=0; i<children.length; i++) { if (children[i].id===childId) { c=children[i]; break; } }
-  if (!c) return;
-  if (!confirm(c.name + 'を削除しますか？')) return;
-  children = children.filter(function(x){return x.id!==childId;});
-  saveChildren();
-  renderChildList();
-  renderStaffList();
-  showToast('削除しました');
-}
 
 
-// ==================== 保育園マスタ画面 ====================
-function initHoikuMasterTab() {
-  var ySel = document.getElementById('shift-year');
-  var mSel = document.getElementById('shift-month');
-  if (ySel && ySel.options.length === 0) {
-    var now = new Date();
-    for (var y=now.getFullYear()-1; y<=now.getFullYear()+2; y++) {
-      var o = document.createElement('option'); o.value=y; o.textContent=y; ySel.appendChild(o);
-    }
-    for (var m=1; m<=12; m++) {
-      var o2 = document.createElement('option'); o2.value=m; o2.textContent=m; mSel.appendChild(o2);
-    }
-    ySel.value = now.getFullYear(); mSel.value = now.getMonth()+1;
-  }
-  var get = function(key) {
-    return fetch(API_URL + '?key=' + key + '&t=' + Date.now()).then(function(r) { return r.json(); });
-  };
-  Promise.all([get('prices'), get('shifts')]).then(function(res) {
-    prices = res[0] || {};
-    shifts = res[1] || {};
-  }).catch(function(){}).then(function() {
-    renderPriceTable();
-    renderShiftPreview();
-  });
-}
 
-function renderPriceTable() {
-  var tb = document.getElementById('price-table');
-  if (!tb) return;
-  var html = '';
-  for (var i=0; i<CHILD_CATEGORIES.length; i++) {
-    var cat = CHILD_CATEGORIES[i];
-    html += '<tr><td>'+cat.label+'</td>';
-    for (var k=0; k<HOIKU_MEAL_KEYS.length; k++) {
-      var mk = HOIKU_MEAL_KEYS[k];
-      html += '<td><input type="number" min="0" step="10" style="width:90px" ' +
-              'class="price-input" data-cat="'+cat.key+'" data-meal="'+mk+'" ' +
-              'value="'+getMealPrice(cat.key, mk)+'"></td>';
-    }
-    html += '</tr>';
-  }
-  tb.innerHTML = html;
-}
 
-function savePrices() {
-  var inputs = document.querySelectorAll('#price-table input.price-input');
-  var next = {};
-  for (var i=0; i<CHILD_CATEGORIES.length; i++) next[CHILD_CATEGORIES[i].key] = {};
-  for (var i=0; i<inputs.length; i++) {
-    var cat = inputs[i].getAttribute('data-cat');
-    var mk = inputs[i].getAttribute('data-meal');
-    var v = parseInt(inputs[i].value, 10);
-    next[cat][mk] = isNaN(v) || v < 0 ? 0 : v;
-  }
-  var statusEl = document.getElementById('price-status');
-  statusEl.textContent = '保存中...';
-  fetch(API_URL + '?key=prices', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(next)
-  }).then(function(r) { return r.json(); }).then(function(res) {
-    if (!res || !res.ok) {
-      statusEl.textContent = '保存に失敗しました';
-      alert('料金の保存に失敗しました: ' + ((res && res.error) || '不明なエラー'));
-      return;
-    }
-    prices = next;
-    statusEl.textContent = '保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）';
-    showToast('食事料金を保存しました');
-  }).catch(function(e) {
-    statusEl.textContent = '保存に失敗しました';
-    alert('料金の保存に失敗しました（通信エラー）: ' + e.message);
-  });
-}
-
-// 勤務区分を月単位でサーバーへ保存する
-function saveShiftsForMonth(ym, monthData, onDone) {
-  var partial = {};
-  partial[ym] = monthData;
-  fetch(API_URL + '?key=shifts&action=merge', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(partial)
-  }).then(function(r) { return r.json(); }).then(function(res) {
-    if (!res || !res.ok) { onDone((res && res.error) || '不明なエラー'); return; }
-    shifts[ym] = monthData;
-    onDone(null);
-  }).catch(function(e) { onDone('通信エラー: ' + e.message); });
-}
-
-function syncShiftsFromDb() {
-  var y = parseInt(document.getElementById('shift-year').value);
-  var m = parseInt(document.getElementById('shift-month').value);
-  var statusEl = document.getElementById('shift-status');
-  statusEl.style.color = '';
-  statusEl.textContent = 'データベースから取得中...';
-  fetch('sync_shifts.php?year=' + y + '&month=' + m + '&t=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(res) {
-      if (!res || !res.ok) {
-        statusEl.style.color = '#dc3545';
-        statusEl.textContent = '同期できませんでした: ' + ((res && res.error) || '不明なエラー');
-        alert('勤務区分の同期に失敗しました。\n\n' + ((res && res.error) || '不明なエラー') +
-              '\n\nsync_shifts.php の接続設定が未入力の場合は、CSV取込をご利用ください。');
-        return;
-      }
-      var ym = y + '-' + pad(m);
-      saveShiftsForMonth(ym, res.shifts || {}, function(err) {
-        if (err) { statusEl.style.color = '#dc3545'; statusEl.textContent = '保存に失敗: ' + err; return; }
-        statusEl.style.color = '';
-        statusEl.textContent = y+'年'+m+'月の勤務区分を同期しました（' + (res.count || 0) + '件）';
-        showToast('勤務区分を同期しました');
-        renderShiftPreview();
-      });
-    })
-    .catch(function(e) {
-      statusEl.style.color = '#dc3545';
-      statusEl.textContent = '同期できませんでした（sync_shifts.php が見つからない可能性があります）';
-      alert('勤務区分の同期に失敗しました: ' + e.message +
-            '\n\nサーバーに sync_shifts.php が配置され、接続設定が済んでいるか確認してください。\n' +
-            '設定が済むまではCSV取込をご利用ください。');
-    });
-}
-
-function importShiftCsv() {
-  var f = document.getElementById('shift-csv-file').files[0];
-  var statusEl = document.getElementById('shift-status');
-  if (!f) { showToast('CSVファイルを選択してください'); return; }
-  var reader = new FileReader();
-  reader.onload = function(ev) {
-    var text = String(ev.target.result || '').replace(/^\uFEFF/, '');
-    var lines = text.split(/\r?\n/);
-    var byMonth = {}, n = 0, skipped = 0;
-    for (var i=0; i<lines.length; i++) {
-      var line = lines[i].trim();
-      if (!line) continue;
-      var cols = line.split(',').map(function(x) { return x.trim().replace(/^"|"$/g, ''); });
-      if (cols.length < 3) { skipped++; continue; }
-      var sid = cols[0], dateStr = cols[1], kubun = cols[2];
-      var md = /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/.exec(dateStr);
-      if (!md || !sid || !kubun) { skipped++; continue; }   // ヘッダ行などは読み飛ばす
-      var ym = md[1] + '-' + pad(parseInt(md[2],10));
-      var day = String(parseInt(md[3],10));
-      if (!byMonth[ym]) byMonth[ym] = {};
-      if (!byMonth[ym][sid]) byMonth[ym][sid] = {};
-      byMonth[ym][sid][day] = kubun;
-      n++;
-    }
-    if (n === 0) {
-      statusEl.style.color = '#dc3545';
-      statusEl.textContent = '取り込める行がありませんでした（形式: 職員ID,日付,勤務区分）';
-      return;
-    }
-    var months = Object.keys(byMonth);
-    var done = 0, errs = [];
-    statusEl.style.color = '';
-    statusEl.textContent = '取込中...';
-    months.forEach(function(ym) {
-      var merged = {};
-      var existing = shifts[ym] || {};
-      for (var sid in existing) { merged[sid] = {}; for (var dd in existing[sid]) merged[sid][dd] = existing[sid][dd]; }
-      for (var sid2 in byMonth[ym]) {
-        if (!merged[sid2]) merged[sid2] = {};
-        for (var dd2 in byMonth[ym][sid2]) merged[sid2][dd2] = byMonth[ym][sid2][dd2];
-      }
-      saveShiftsForMonth(ym, merged, function(err) {
-        if (err) errs.push(ym + ': ' + err);
-        done++;
-        if (done === months.length) {
-          if (errs.length) {
-            statusEl.style.color = '#dc3545';
-            statusEl.textContent = '一部保存に失敗: ' + errs.join(' / ');
-          } else {
-            statusEl.style.color = '';
-            statusEl.textContent = n + '件を取り込みました（対象月: ' + months.join('、') + '）' +
-                                   (skipped ? ' ／ 読み飛ばし ' + skipped + '行' : '');
-            showToast('勤務区分を取り込みました');
-          }
-          renderShiftPreview();
-        }
-      });
-    });
-  };
-  reader.readAsText(f, 'UTF-8');
-}
-
-function exportShiftCsv() {
-  var y = parseInt(document.getElementById('shift-year').value);
-  var m = parseInt(document.getElementById('shift-month').value);
-  var ym = y + '-' + pad(m);
-  var month = shifts[ym] || {};
-  var csv = '\uFEFF職員ID,氏名,日付,勤務区分\n';
-  var days = daysInMonth(y, m);
-  var ids = Object.keys(month).sort();
-  for (var i=0; i<ids.length; i++) {
-    var st = getStaffById(ids[i]);
-    for (var d=1; d<=days; d++) {
-      var v = month[ids[i]][d];
-      if (!v) continue;
-      csv += '"'+ids[i]+'","'+(st?st.name:'')+'","'+y+'-'+pad(m)+'-'+pad(d)+'","'+String(v).replace(/"/g,'""')+'"\n';
-    }
-  }
-  downloadFile(csv, '勤務区分_'+y+'年'+pad(m)+'月.csv', 'text/csv;charset=utf-8');
-  showToast('勤務区分CSVを出力しました');
-}
-
-function renderShiftPreview() {
-  var wrap = document.getElementById('shift-preview');
-  if (!wrap) return;
-  var y = parseInt(document.getElementById('shift-year').value);
-  var m = parseInt(document.getElementById('shift-month').value);
-  var ym = y + '-' + pad(m);
-  var month = shifts[ym] || {};
-  var ids = Object.keys(month).sort();
-  if (ids.length === 0) {
-    wrap.innerHTML = '<p class="help-text">'+y+'年'+m+'月の勤務区分はまだ取り込まれていません。</p>';
-    return;
-  }
-  var days = daysInMonth(y, m);
-  var html = '<p class="help-text">'+y+'年'+m+'月の勤務区分（'+ids.length+'名）</p>';
-  html += '<table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th>';
-  for (var d=1; d<=days; d++) html += '<th>'+d+'</th>';
-  html += '</tr></thead><tbody>';
-  for (var i=0; i<ids.length; i++) {
-    var st = getStaffById(ids[i]);
-    html += '<tr><td>'+esc(ids[i])+'</td><td style="white-space:nowrap">'+esc(st?st.name:'')+'</td>';
-    for (var d=1; d<=days; d++) html += '<td style="font-size:0.7rem">'+esc(month[ids[i]][d]||'')+'</td>';
-    html += '</tr>';
-  }
-  html += '</tbody></table>';
-  wrap.innerHTML = html;
-}
 
 // ==================== DATA MANAGEMENT ====================
 function updatePwStatus() {
@@ -2769,7 +2310,11 @@ document.addEventListener('DOMContentLoaded', function() {
   loadData().then(function() {
     document.querySelectorAll('.tab-btn').forEach(function(btn) {
       if (btn.id === 'admin-toggle') return;
-      btn.addEventListener('click', function() { showTab(this.getAttribute('data-tab')); });
+      btn.addEventListener('click', function() {
+        // 管理者トグルなど data-tab を持たないボタンは対象外
+        var t = this.getAttribute('data-tab');
+        if (t) showTab(t);
+      });
     });
     document.getElementById('admin-toggle').addEventListener('click', toggleAdmin);
 
@@ -2792,9 +2337,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('staff-search').addEventListener('input', renderStaffList);
     document.getElementById('csv-import').addEventListener('click', importCSV);
     document.getElementById('csv-export').addEventListener('click', exportCSV);
-    document.getElementById('child-staff-search').addEventListener('input', populateChildStaff);
-    document.getElementById('child-staff').addEventListener('change', renderChildList);
-    document.getElementById('child-form').addEventListener('submit', submitChild);
 
     document.getElementById('order-year').addEventListener('change', renderOrderGrid);
     document.getElementById('order-month').addEventListener('change', renderOrderGrid);
@@ -2864,12 +2406,6 @@ document.addEventListener('DOMContentLoaded', function() {
     renderLockStatus();
     renderOrderLockNotice();
 
-    document.getElementById('price-save').addEventListener('click', savePrices);
-    document.getElementById('shift-sync').addEventListener('click', syncShiftsFromDb);
-    document.getElementById('shift-csv-import').addEventListener('click', importShiftCsv);
-    document.getElementById('shift-csv-export').addEventListener('click', exportShiftCsv);
-    document.getElementById('shift-year').addEventListener('change', renderShiftPreview);
-    document.getElementById('shift-month').addEventListener('change', renderShiftPreview);
 
     document.getElementById('data-export').addEventListener('click', dataExport);
     document.getElementById('data-import').addEventListener('click', dataImport);
