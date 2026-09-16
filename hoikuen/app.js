@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-16a';
+var APP_VERSION = '2026-09-16b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -270,18 +270,25 @@ function typeLabel(v) { return v==='normal'?'普通食':v==='kizami'?'きざみ�
 // ==================== 勤務区分マスタ ====================
 // 標準の勤務区分と、その勤務のときに子供に必要な食事
 var DEFAULT_SHIFT_DEFS = [
-  {name:'Ａ',     meals:{b:false, s1:true,  l:true,  s2:true,  d:false}},
-  {name:'ＡＭ',   meals:{b:false, s1:true,  l:true,  s2:false, d:false}},
-  {name:'ＰＭ',   meals:{b:false, s1:false, l:false, s2:true,  d:false}},
-  {name:'夕診',   meals:{b:false, s1:false, l:false, s2:true,  d:true }},
-  {name:'日夕診', meals:{b:false, s1:true,  l:true,  s2:true,  d:true }},
-  {name:'入',     meals:{b:false, s1:false, l:false, s2:false, d:true }},
-  {name:'明',     meals:{b:true,  s1:false, l:false, s2:false, d:false}}
+  {name:'Ａ',     code:'', meals:{b:false, s1:true,  l:true,  s2:true,  d:false}},
+  {name:'ＡＭ',   code:'', meals:{b:false, s1:true,  l:true,  s2:false, d:false}},
+  {name:'ＰＭ',   code:'', meals:{b:false, s1:false, l:false, s2:true,  d:false}},
+  {name:'夕診',   code:'', meals:{b:false, s1:false, l:false, s2:true,  d:true }},
+  {name:'日夕診', code:'', meals:{b:false, s1:true,  l:true,  s2:true,  d:true }},
+  {name:'入',     code:'', meals:{b:false, s1:false, l:false, s2:false, d:true }},
+  {name:'明',     code:'', meals:{b:true,  s1:false, l:false, s2:false, d:false}}
 ];
 
-function getShiftDef(name) {
+// 勤務区分は「名称」でも「勤務CD」でも引けるようにする。
+// 勤務管理DBから勤務CDのまま取り込まれた場合に対応するため。
+function getShiftDef(value) {
+  if (!value) return null;
+  var v = String(value).trim();
   for (var i=0; i<shiftDefs.length; i++) {
-    if (shiftDefs[i].name === name) return shiftDefs[i];
+    if (shiftDefs[i].name === v) return shiftDefs[i];
+  }
+  for (var i=0; i<shiftDefs.length; i++) {
+    if (shiftDefs[i].code && String(shiftDefs[i].code).trim() === v) return shiftDefs[i];
   }
   return null;
 }
@@ -1032,6 +1039,7 @@ function renderShiftDefTable() {
   for (var i=0; i<shiftDefs.length; i++) {
     var sd = shiftDefs[i];
     html += '<tr><td>'+esc(sd.name)+'</td>';
+    html += '<td><input type="text" class="sd-code" data-i="'+i+'" style="width:110px" value="'+esc(sd.code||'')+'" placeholder="任意"></td>';
     for (var k=0; k<MEAL_KEYS.length; k++) {
       var mk = MEAL_KEYS[k];
       var on = sd.meals && sd.meals[mk];
@@ -1039,7 +1047,7 @@ function renderShiftDefTable() {
     }
     html += '<td><button class="btn-del" data-sd-del="'+i+'">削除</button></td></tr>';
   }
-  if (!html) html = '<tr><td colspan="7" style="text-align:center;color:#999">勤務区分が未登録です。「標準の7区分を入れる」を押してください。</td></tr>';
+  if (!html) html = '<tr><td colspan="8" style="text-align:center;color:#999">勤務区分が未登録です。「標準の7区分を入れる」を押してください。</td></tr>';
   tb.innerHTML = html;
   var dels = tb.querySelectorAll('button[data-sd-del]');
   for (var i=0; i<dels.length; i++) {
@@ -1054,6 +1062,11 @@ function renderShiftDefTable() {
 }
 
 function collectShiftDefs() {
+  var codes = document.querySelectorAll('#shiftdef-table input.sd-code');
+  for (var i=0; i<codes.length; i++) {
+    var idx = parseInt(codes[i].getAttribute('data-i'), 10);
+    shiftDefs[idx].code = codes[i].value.trim();
+  }
   var chks = document.querySelectorAll('#shiftdef-table input.sd-chk');
   for (var i=0; i<chks.length; i++) {
     var idx = parseInt(chks[i].getAttribute('data-i'), 10);
@@ -1085,8 +1098,11 @@ function addShiftDef(e) {
   if (!name) return;
   if (getShiftDef(name)) { showToast('同じ名前の勤務区分が既にあります'); return; }
   collectShiftDefs();
-  shiftDefs.push({name: name, meals: {b:false,s1:false,l:false,s2:false,d:false}});
+  var codeEl = document.getElementById('sd-code');
+  shiftDefs.push({name: name, code: (codeEl ? codeEl.value.trim() : ''),
+                  meals: {b:false,s1:false,l:false,s2:false,d:false}});
   nameEl.value = '';
+  if (codeEl) codeEl.value = '';
   renderShiftDefTable();
   showToast(name + ' を追加しました。食事にチェックして保存してください');
 }
