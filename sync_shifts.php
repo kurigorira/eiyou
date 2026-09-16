@@ -31,7 +31,7 @@
 // --- 1) データベース接続 ---
 // $DB_TYPE: 'auto' | 'sqlsrv'(SQL Server) | 'oci'(Oracle) | 'pgsql' | 'mysql'
 $DB_TYPE = 'auto';
-$DB_HOST = '';            // ★ここにJOYNUSのDBサーバーのIPアドレスを入れてください（例: '10.20.103.200'）
+$DB_HOST = '10.20.1.36';  // JOYNUSのDBサーバー
 $DB_PORT = '';            // 既定ポート以外の場合のみ指定（例: '1433'）
 $DB_NAME = 'nagasakidb';
 $DB_USER = 'viewer';
@@ -67,6 +67,9 @@ $KINMDATA_TABLE = 'JoyKinmData';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, no-store');
 
+// 1つのドライバを試す際の接続待ち時間（秒）。順に試すので短めにする。
+define('CONNECT_TIMEOUT', 5);
+
 $debug = isset($_GET['debug']) && $_GET['debug'] == '1';
 $probe = isset($_GET['probe']) && $_GET['probe'] == '1';
 
@@ -81,8 +84,10 @@ function fail($msg, $extra = null) {
 function buildDsnCandidates($type, $host, $port, $name) {
     $avail = PDO::getAvailableDrivers();
     $mk = array(
-        'sqlsrv' => 'sqlsrv:Server=' . $host . ($port ? ',' . $port : '') . ';Database=' . $name,
-        'pgsql'  => 'pgsql:host=' . $host . ';port=' . ($port ? $port : '5432') . ';dbname=' . $name,
+        'sqlsrv' => 'sqlsrv:Server=' . $host . ($port ? ',' . $port : '') . ';Database=' . $name
+                  . ';LoginTimeout=' . CONNECT_TIMEOUT,
+        'pgsql'  => 'pgsql:host=' . $host . ';port=' . ($port ? $port : '5432') . ';dbname=' . $name
+                  . ';connect_timeout=' . CONNECT_TIMEOUT,
         'mysql'  => 'mysql:host=' . $host . ';port=' . ($port ? $port : '3306') . ';dbname=' . $name . ';charset=utf8mb4',
         'oci'    => 'oci:dbname=//' . $host . ':' . ($port ? $port : '1521') . '/' . $name . ';charset=AL32UTF8',
         // SQL Server は sqlsrv が無い環境で ODBC 経由になることがある
@@ -105,7 +110,7 @@ function connectDb($cands, $user, $pass, &$usedDriver, &$tried) {
             $pdo = new PDO($dsn, $user, $pass, array(
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_TIMEOUT => 5,
+                PDO::ATTR_TIMEOUT => CONNECT_TIMEOUT,
             ));
             $usedDriver = $drv;
             return $pdo;
