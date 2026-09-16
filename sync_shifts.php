@@ -59,7 +59,33 @@ $KINMU_TABLE      = 'JoyKinmu';
 $KINMU_CD_COL     = 'Kinmu';      // 勤務CDの列名
 $KINMU_NAME_COL   = 'Ryaku';      // 表示名の列名（略称）
 
-// --- 6) テーブル名（通常は変更不要）---
+// --- 6) 職員IDの対応づけ（重要）---
+// JOYNUSの個人CDは6桁、給食システムの職員IDは電子カルテIDの8桁で桁数が違います。
+// 1対1で対応しているため、下記のいずれかの方法で変換します。
+//
+//   'auto'  : ①手動対応表 → ②そのまま一致 → ③ゼロ埋め8桁で一致 → ④氏名で一致
+//             の順に試します（推奨。設定不要で多くの場合つながります）
+//   'pad8'  : 先頭をゼロ埋めして8桁にするだけ（例: 123456 → 00123456）
+//   'name'  : JoyKojin.KjName と給食システムの職員氏名で突き合わせる
+//   'map'   : 手動対応表だけを使う
+//   'none'  : 変換しない（JOYNUSの6桁のまま取り込む）
+$ID_MAP_MODE = 'auto';
+
+// 手動対応表。{"JOYNUS個人CD": "給食システムの職員ID"} の形式のJSONファイル。
+// 自動で対応づかない職員だけをここに書けば済みます。
+$ID_MAP_FILE = __DIR__ . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR . 'shift_idmap.json';
+
+// 給食システムの職員マスタ（氏名突合とID確認に使用）
+$STAFF_FILE = __DIR__ . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR . 'staff.json';
+
+// 勤務個人マスタ（氏名・在籍状態の取得元）
+$KOJIN_TABLE     = 'JoyKojin';
+$KOJIN_CD_COL    = 'Code';        // 個人CD
+$KOJIN_NAME_COL  = 'KjName';      // 職員氏名
+$KOJIN_STATE_COL = 'KyutaiKbn';   // 所属の状態 0:在籍 1:退職 2:異動
+$EXCLUDE_RETIRED = true;          // 退職者(1)を取り込み対象から外す
+
+// --- 7) テーブル名（通常は変更不要）---
 $KINMDATA_TABLE = 'JoyKinmData';
 
 /* ===================== 【接続設定】ここまで ===================== */
@@ -133,6 +159,86 @@ function qid($driver, $name) {
     }
 }
 
+/** 氏名を比較用に正規化する（全角・半角スペースを除去） */
+function normName($s) {
+    $s = trim((string)$s);
+    return str_replace(array(' ', '　', "\t"), '', $s);
+}
+
+/** JoyKojin から 個人CD => [氏名, 在籍状態] を読む */
+function loadKojin($pdo, $driver, $table, $cdCol, $nameCol, $stateCol) {
+    $out = array();
+    try {
+        $sql = 'SELECT ' . qid($driver,$cdCol) . ' AS "cd", ' . qid($driver,$nameCol) . ' AS "nm"';
+        if ($stateCol) $sql .= ', ' . qid($driver,$stateCol) . ' AS "st"';
+        $sql .= ' FROM ' . qid($driver,$table);
+        foreach ($pdo->query($sql)->fetchAll() as $r) {
+            $cd = trim((string)$r['cd']);
+            if ($cd === '') continue;
+            $out[$cd] = array(
+                'name'  => trim((string)$r['nm']),
+                'state' => isset($r['st']) ? trim((string)$r['st']) : '0',
+            );
+        }
+    } catch (Exception $e) {
+        // 読めなくても同期は続行する（IDそのまま・ゼロ埋めでの対応づけは可能）
+    }
+    return $out;
+}
+
+/** 給食システムの職員マスタ（staff.json）を読む */
+function loadStaffMaster($file) {
+    $byId = array(); $byName = array();
+    if (is_file($file)) {
+        $j = json_decode((string)file_get_contents($file), true);
+        if (is_array($j)) {
+            foreach ($j as $st) {
+                if (!isset($st['id'])) continue;
+                $id = trim((string)$st['id']);
+                if ($id === '') continue;
+                $byId[$id] = true;
+                $nm = normName(isset($st['name']) ? $st['name'] : '');
+                if ($nm !== '') {
+                    // 同姓同名は誤対応を避けるため対象外にする
+                    $byName[$nm] = isset($byName[$nm]) ? '__DUP__' : $id;
+                }
+            }
+        }
+    }
+    return array('byId' => $byId, 'byName' => $byName);
+}
+
+/** JOYNUSの個人CDを給食システムの職員IDに変換する */
+function mapKojinToStaffId($cd, $mode, $manual, $kojin, $staff, &$how) {
+    $how = '';
+    if ($mode === 'none') { $how = 'そのまま'; return $cd; }
+
+    // ① 手動対応表
+    if (($mode === 'auto' || $mode === 'map') && isset($manual[$cd]) && $manual[$cd] !== '') {
+        $how = '対応表'; return trim((string)$manual[$cd]);
+    }
+    if ($mode === 'map') return '';
+
+    // ② そのまま職員マスタにある
+    if ($mode === 'auto' && isset($staff['byId'][$cd])) { $how = '一致'; return $cd; }
+
+    // ③ ゼロ埋めして8桁
+    if ($mode === 'auto' || $mode === 'pad8') {
+        $p = str_pad($cd, 8, '0', STR_PAD_LEFT);
+        if ($mode === 'pad8') { $how = 'ゼロ埋め'; return $p; }
+        if (isset($staff['byId'][$p])) { $how = 'ゼロ埋め'; return $p; }
+    }
+
+    // ④ 氏名で突き合わせ
+    if ($mode === 'auto' || $mode === 'name') {
+        $nm = isset($kojin[$cd]) ? normName($kojin[$cd]['name']) : '';
+        if ($nm !== '' && isset($staff['byName'][$nm]) && $staff['byName'][$nm] !== '__DUP__') {
+            $how = '氏名'; return $staff['byName'][$nm];
+        }
+    }
+    return '';
+}
+
 /** テーブルの列名を1行だけ読んで調べる */
 function probeColumns($pdo, $driver, $table) {
     try {
@@ -179,7 +285,9 @@ if ($probe) {
         'user'        => $DB_USER,
         'JoyKinmData' => probeColumns($pdo, $usedDriver, $KINMDATA_TABLE),
         'JoyKinmu'    => probeColumns($pdo, $usedDriver, $KINMU_TABLE),
-        'hint'        => 'JoyKinmu の列名を確認し、$KINMU_CD_COL と $KINMU_NAME_COL を合わせてください。',
+        'JoyKojin'    => probeColumns($pdo, $usedDriver, $KOJIN_TABLE),
+        'hint'        => 'JoyKinmu の列名を確認し $KINMU_CD_COL / $KINMU_NAME_COL を合わせてください。'
+                       . ' また JoyKojin の Code（6桁）と給食システムの職員ID（8桁）の対応を確認してください。',
     ), JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -244,6 +352,15 @@ try {
             $nameOf = array();
         }
     }
+
+    // --- 職員IDの対応づけに使う情報を読む ---
+    $kojin = loadKojin($pdo, $usedDriver, $KOJIN_TABLE, $KOJIN_CD_COL, $KOJIN_NAME_COL, $KOJIN_STATE_COL);
+    $staff = loadStaffMaster($STAFF_FILE);
+    $manual = array();
+    if (is_file($ID_MAP_FILE)) {
+        $mj = json_decode((string)file_get_contents($ID_MAP_FILE), true);
+        if (is_array($mj)) $manual = $mj;
+    }
 } catch (Exception $e) {
     fail('勤務データの取得に失敗しました: ' . $e->getMessage(),
          array('driver' => $usedDriver, 'table' => $KINMDATA_TABLE));
@@ -262,12 +379,36 @@ $out   = array();
 $count = 0;
 $rawSamples = array();
 
+$unmapped = array();
+$mappedHow = array();
+
 foreach ($rows as $r) {
-    $sid = trim((string)$r['Kojin']);
+    $cd  = trim((string)$r['Kojin']);
     $tbl = (string)$r['KinmuTbl'];
-    if ($sid === '') continue;
+    if ($cd === '') continue;
+
+    // 退職者は取り込まない
+    if ($EXCLUDE_RETIRED && isset($kojin[$cd]) && $kojin[$cd]['state'] === '1') continue;
+
+    // JOYNUSの個人CD(6桁) → 給食システムの職員ID(8桁)
+    $how = '';
+    $sid = mapKojinToStaffId($cd, $ID_MAP_MODE, $manual, $kojin, $staff, $how);
+    if ($sid === '') {
+        $unmapped[$cd] = isset($kojin[$cd]) ? $kojin[$cd]['name'] : '';
+        continue;
+    }
+    if (!isset($mappedHow[$how])) $mappedHow[$how] = 0;
+    $mappedHow[$how]++;
+
     if ($debug && count($rawSamples) < 3) {
-        $rawSamples[] = array('Kojin' => $sid, 'Busyo' => trim((string)$r['Busyo']), 'KinmuTbl' => $tbl);
+        $rawSamples[] = array(
+            'JOYNUS個人CD' => $cd,
+            '氏名'         => isset($kojin[$cd]) ? $kojin[$cd]['name'] : '',
+            '職員ID'       => $sid,
+            '対応づけ'     => $how,
+            'Busyo'        => trim((string)$r['Busyo']),
+            'KinmuTbl'     => $tbl,
+        );
     }
     for ($d = 1; $d <= $days; $d++) {
         $cd = trim(substr($tbl, ($d - 1) * 3, 3));
@@ -280,7 +421,16 @@ foreach ($rows as $r) {
     }
 }
 
-$res = array('ok' => true, 'shifts' => $out, 'count' => $count);
+$unmappedList = array();
+foreach ($unmapped as $cd => $nm) $unmappedList[] = array('個人CD' => $cd, '氏名' => $nm);
+
+$res = array(
+    'ok'          => true,
+    'shifts'      => $out,
+    'count'       => $count,
+    'staffCount'  => count($out),
+    'unmapped'    => $unmappedList,     // 職員IDに対応づかなかった人
+);
 if ($debug) {
     $res['debug'] = array(
         'driver'        => $usedDriver,
@@ -288,6 +438,10 @@ if ($debug) {
         'kbn'           => $KBN,
         'rowCount'      => count($rows),
         'daysInMonth'   => $days,
+        'idMapMode'     => $ID_MAP_MODE,
+        'idMapHow'      => $mappedHow,   // どの方法で何人対応づいたか
+        'kojinCount'    => count($kojin),
+        'staffCount'    => count($staff['byId']),
         'kinmuMasterCt' => count($nameOf),
         'kinmuMaster'   => array_slice($nameOf, 0, 20, true),
         'kinmuError'    => $kinmuErr,

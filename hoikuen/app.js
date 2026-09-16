@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-16b';
+var APP_VERSION = '2026-09-16c';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1146,7 +1146,23 @@ function syncShiftsFromDb() {
       saveShiftsForMonth(ym, res.shifts || {}, function(err) {
         if (err) { statusEl.style.color = '#dc3545'; statusEl.textContent = '保存に失敗: ' + err; return; }
         statusEl.style.color = '';
-        statusEl.textContent = y+'年'+m+'月の勤務区分を同期しました（'+(res.count||0)+'件）';
+        var msg = y+'年'+m+'月の勤務区分を同期しました（'+(res.staffCount||0)+'名 / '+(res.count||0)+'件）';
+        var un = res.unmapped || [];
+        if (un.length > 0) {
+          statusEl.style.color = '#dc3545';
+          msg += ' ／ 職員IDに対応づかなかった人が ' + un.length + ' 名います';
+          var names = un.slice(0, 10).map(function(u) {
+            return (u['氏名'] || '(氏名不明)') + '(' + u['個人CD'] + ')';
+          }).join('、');
+          alert('勤務区分を同期しましたが、' + un.length + '名は給食システムの職員IDに'
+              + '対応づけできませんでした。この職員の勤務区分は取り込まれていません。\n\n'
+              + names + (un.length > 10 ? ' ほか' + (un.length-10) + '名' : '')
+              + '\n\n【対処】\n'
+              + '・職員マスタにその職員が登録されているか確認してください\n'
+              + '・登録済みなら、サーバーの data/shift_idmap.json に\n'
+              + '  {"' + un[0]['個人CD'] + '": "電子カルテID"} の形で対応を追記してください');
+        }
+        statusEl.textContent = msg;
         showToast('勤務区分を同期しました');
         renderShiftPreview();
       });
