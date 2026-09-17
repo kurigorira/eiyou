@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-08-24c';
+var APP_VERSION = '2026-09-17a';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
@@ -126,6 +126,109 @@ function waitForMergeIdle(key, cb, tries) {
 function saveHolidays() { apiSave('holidays', holidays); }
 function saveHistory() { apiSave('history', opHistory); }
 function saveChildren() { apiSave('children', children); }
+
+function saveConfig() { apiSave('config', config); }
+function saveConfirmed() { apiSave('confirmed', confirmed); }
+function saveKensa() { apiSave('kensa', kensa); }
+
+function getChildrenByStaff(staffId) {
+  return children.filter(function(c) { return c.staffId === staffId; });
+}
+
+function addHistory(staffId, yearMonth, action, detail) {
+  var s = getStaffById(staffId);
+  var name = s ? s.name : staffId;
+  opHistory.unshift({
+    timestamp: new Date().toLocaleString('ja-JP'),
+    staffId: staffId,
+    staffName: name,
+    yearMonth: yearMonth,
+    action: action,
+    detail: detail || ''
+  });
+  if (opHistory.length > 2000) opHistory = opHistory.slice(0, 2000);
+  saveHistory();
+}
+
+function showToast(msg) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { el.classList.remove('show'); }, 2000);
+}
+
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+function fmtDate(d) { return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
+function dayOfWeek(y, m, d) { return new Date(y, m-1, d).getDay(); }
+function isWeekend(y, m, d) { var dow = dayOfWeek(y,m,d); return dow===0||dow===6; }
+function getHolidayName(dateStr) {
+  for (var i=0; i<holidays.length; i++) { if(holidays[i].date===dateStr) return holidays[i].name; }
+  return null;
+}
+function isHoliday(dateStr) { return getHolidayName(dateStr) !== null; }
+function isWorkday(y, m, d) {
+  var ds = y+'-'+pad(m)+'-'+pad(d);
+  return !isWeekend(y,m,d) && !isHoliday(ds);
+}
+
+function getStaffById(id) {
+  for (var i=0; i<staffList.length; i++) { if(staffList[i].id===id) return staffList[i]; }
+  return null;
+}
+function getDepartments() {
+  var deps = {};
+  for (var i=0; i<staffList.length; i++) deps[staffList[i].dept] = true;
+  return Object.keys(deps).sort();
+}
+function getStaffSorted() {
+  return staffList.slice().sort(function(a,b) {
+    if (a.dept < b.dept) return -1; if (a.dept > b.dept) return 1;
+    if (a.id < b.id) return -1; if (a.id > b.id) return 1; return 0;
+  });
+}
+
+var orderLocked = true;
+var orderDirty = false;
+
+function getOrderStatus(staffId, y, m) {
+  var sKey = y+'-'+pad(m)+'_'+staffId;
+  return confirmed[sKey] === true;
+}
+function setOrderConfirmed(staffId, y, m, val) {
+  var sKey = y+'-'+pad(m)+'_'+staffId;
+  if (val) confirmed[sKey] = true; else delete confirmed[sKey];
+  var partial = {};
+  partial[sKey] = val ? true : null;
+  apiMerge('confirmed', partial);
+}
+
+function emptyMeal() { return {b:false,l:false,d:false,dd:false}; }
+
+// 集計用: 「確定」済みの注文だけを対象にする（未確定は0扱い）
+function getCountedOrder(staffId, y, m, d) {
+  if (!getOrderStatus(staffId, y, m)) return emptyMeal();
+  return getOrder(staffId, y, m, d);
+}
+
+// 未確定のまま入力がある職員の一覧（集計に含まれないもの）
+function getUnconfirmedStaff(y, m) {
+  var days = daysInMonth(y, m);
+  var sorted = getStaffSorted();
+  var out = [];
+  for (var i=0; i<sorted.length; i++) {
+    var s = sorted[i];
+    if (getOrderStatus(s.id, y, m)) continue;
+    var n = 0;
+    for (var d=1; d<=days; d++) {
+      var o = getOrder(s.id, y, m, d);
+      if (o.b) n++; if (o.l) n++; if (o.d) n++; if (o.dd) n++;
+    }
+    if (n > 0) out.push({staff:s, count:n});
+  }
+  return out;
+}
 
 function getOrder(staffId, y, m, d) {
   var key = y+'-'+pad(m);
