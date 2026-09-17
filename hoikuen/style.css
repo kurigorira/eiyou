@@ -54,6 +54,10 @@ header h1 { font-size: 1.2rem; margin-bottom: 8px; }
 .tab-btn:hover { background: rgba(255,255,255,0.3); }
 .tab-btn.active { background: var(--bg); color: var(--text); }
 
+/* 管理者モードの切替ボタン。ONのときは一目で分かるようにする */
+.tab-btn-admin { border-radius: 4px; }
+.tab-btn-admin.active-admin { background: var(--danger); color: #fff; }
+
 .nav-link {
   color: rgba(255,255,255,0.8);
   text-decoration: none;
@@ -201,6 +205,17 @@ input[type="text"], input[type="date"], select {
 }
 
 .help-text { color: var(--text-light); font-size: 0.82rem; margin-bottom: 8px; }
+
+/* 表の中に置く勤務区分の選択欄 */
+.shift-sel, .msh-sel {
+  font-size: 0.8rem;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  min-width: 78px;
+}
+.shift-sel:disabled, .msh-sel:disabled { background: #eee; color: #999; }
 
 .placeholder-msg {
   color: var(--text-light);

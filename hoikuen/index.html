@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20260770">
+<link rel="stylesheet" href="style.css?v=20260791">
 </head>
 <body>
 <div id="app">
@@ -104,6 +104,7 @@
         <span id="order-status" class="order-status"></span>
         <button class="btn" id="order-confirm">確定</button>
         <button class="btn btn-outline" id="order-edit">修正</button>
+        <button class="btn btn-danger-outline" id="order-unconfirm" style="display:none">確定解除（管理者）</button>
       </div>
     </section>
 
@@ -210,6 +211,32 @@
       </div>
 
       <div class="card">
+        <h3>勤務区分の手入力</h3>
+        <p class="help-text">勤務管理データベースから取り込めない場合や、取込後に個別で直したい場合は、ここで保護者ごとに1か月分の勤務区分を入力できます。<br>
+          入力した内容は「注文入力」画面の<strong>保護者の勤務</strong>欄に反映され、「勤務区分から一括反映」で食事を自動で入れられます。</p>
+        <div class="inline-form">
+          <input type="text" id="msh-staff-search" placeholder="保護者検索（ID・氏名・部署）" style="width:190px">
+          <label>保護者:
+            <select id="msh-staff"><option value="">-- 選択 --</option></select>
+          </label>
+          <label>年月:
+            <select id="msh-year"></select>年
+            <select id="msh-month"></select>月
+          </label>
+        </div>
+        <div class="inline-form" style="margin-top:8px">
+          <label>一括:
+            <select id="msh-bulk-value"><option value="">−</option></select>
+          </label>
+          <button class="btn btn-outline" id="msh-bulk-weekday">平日にまとめて入れる</button>
+          <button class="btn btn-outline" id="msh-copy-prev">前月コピー</button>
+          <button class="btn btn-danger-outline" id="msh-clear">当月クリア</button>
+          <span id="msh-status" class="help-text"></span>
+        </div>
+        <div id="msh-grid" style="margin-top:10px;overflow-x:auto"></div>
+      </div>
+
+      <div class="card">
         <h3>職員の勤務区分の取込</h3>
         <p class="help-text">保護者職員の日ごとの勤務区分です。勤務管理データベースから取り込みます。</p>
         <div class="inline-form">
@@ -218,8 +245,11 @@
             <select id="shift-month"></select>月
           </label>
           <button class="btn" id="shift-sync">データベースから同期</button>
+          <button class="btn btn-outline" id="shift-probe">接続テスト</button>
         </div>
-        <p class="help-text" style="margin-top:8px">DB接続が未設定の場合はCSV取込をご利用ください。<br>
+        <div id="shift-probe-result" style="margin-top:10px"></div>
+        <p class="help-text" style="margin-top:8px">同期できないときは<strong>接続テスト</strong>を押してください。原因と対処が表示されます。<br>
+          DB接続が未設定の場合はCSV取込をご利用ください。<br>
           形式: <code>職員ID,日付(YYYY-MM-DD),勤務区分</code>（UTF-8・ヘッダ行あり/なし対応）</p>
         <div class="csv-controls">
           <input type="file" id="shift-csv-file" accept=".csv,.txt">
@@ -250,7 +280,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20260770"></script>
-<script src="app.js?v=20260770"></script>
+<script src="../xlsx.js?v=20260791"></script>
+<script src="app.js?v=20260791"></script>
 </body>
 </html>

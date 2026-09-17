@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-16c';
+var APP_VERSION = '2026-09-17b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -63,8 +63,8 @@ var mergeQueue = {};
 function mergePartialInto(target, src, depth) {
   for (var k in src) {
     if (depth >= 2 && src[k] && typeof src[k] === 'object' && !Array.isArray(src[k])) {
-      if (!target[k] || typeof target[k] !== 'object') target[k] = {};
-      for (var k2 in src[k]) target[k][k2] = src[k][k2];
+      if (!target[k] || typeof target[k] !== 'object' || Array.isArray(target[k])) target[k] = {};
+      mergePartialInto(target[k], src[k], depth - 1);
     } else {
       target[k] = src[k];
     }
@@ -189,6 +189,61 @@ function getShift(staffId, y, m, d) {
   return shifts[ym][staffId][d] || '';
 }
 
+// 勤務区分を手入力で書き換える（メモリ上のみ。保存は saveShiftDay / saveShiftStaffMonth）
+function setShift(staffId, y, m, d, value) {
+  var ym = y + '-' + pad(m);
+  // PHPの json_encode は空の配列を [] として書き出すため、
+  // 読み込んだ値が配列だったらオブジェクトに作り直してから代入する
+  if (!shifts[ym] || Object.prototype.toString.call(shifts[ym]) === '[object Array]') shifts[ym] = {};
+  if (!shifts[ym][staffId] || Object.prototype.toString.call(shifts[ym][staffId]) === '[object Array]') {
+    shifts[ym][staffId] = {};
+  }
+  var v = (value == null) ? '' : String(value).trim();
+  if (v === '') delete shifts[ym][staffId][d];
+  else shifts[ym][staffId][String(d)] = v;
+}
+
+// 1日分の勤務区分をサーバーに保存する
+function saveShiftDay(staffId, y, m, d, value) {
+  var ym = y + '-' + pad(m);
+  var partial = {};
+  partial[ym] = {};
+  partial[ym][staffId] = {};
+  partial[ym][staffId][String(d)] = (value === '') ? null : value;
+  apiMerge('shifts', partial, 3);
+}
+
+// 1人分の1か月をまとめてサーバーに保存する
+function saveShiftStaffMonth(staffId, y, m) {
+  var ym = y + '-' + pad(m);
+  var cur = (shifts[ym] && shifts[ym][staffId]) ? shifts[ym][staffId] : {};
+  var hasAny = false;
+  for (var k in cur) { hasAny = true; break; }
+  if (!hasAny && shifts[ym]) delete shifts[ym][staffId];
+  var partial = {};
+  partial[ym] = {};
+  // 消した日も反映させるため、この職員の1か月分は丸ごと置き換える。
+  // 空になったときは null を送る（PHPが {} を [] として書き出すのを防ぐ）
+  partial[ym][staffId] = hasAny ? cur : null;
+  apiMerge('shifts', partial, 2);
+}
+
+// 勤務区分の選択肢。マスタに無い値（DB取込の勤務CD等）も選択肢に残す
+function shiftOptionsHtml(current) {
+  var cur = current || '';
+  var html = '<option value="">−</option>';
+  var found = (cur === '');
+  for (var i = 0; i < shiftDefs.length; i++) {
+    var n = shiftDefs[i].name;
+    if (n === cur) found = true;
+    html += '<option value="' + esc(n) + '"' + (n === cur ? ' selected' : '') + '>' + esc(n) + '</option>';
+  }
+  if (!found) {
+    html += '<option value="' + esc(cur) + '" selected>' + esc(cur) + '（マスタ未登録）</option>';
+  }
+  return html;
+}
+
 // 子供1人の月間の食数と金額を集計する
 function childMonthCost(child, y, m) {
   var days = daysInMonth(y, m);
@@ -302,6 +357,13 @@ function applyHoikuAdmin() {
   var btn = document.getElementById('hadmin-toggle');
   if (hAdminMode) { btn.textContent = '管理者モード解除'; btn.classList.add('active-admin'); }
   else { btn.textContent = '管理者'; btn.classList.remove('active-admin'); }
+  // 管理者の編集権限を注文入力画面にすぐ反映する
+  if (document.getElementById('order-child') && document.getElementById('order-child').value) {
+    renderOrderGrid();
+  } else {
+    renderOrderLockNotice();
+    setOrderControlsDisabled(isOrderInputBlocked());
+  }
 }
 
 function toggleHoikuAdmin() {
@@ -529,7 +591,10 @@ function renderOrderGrid() {
     var sd = sh ? getShiftDef(sh) : null;
     var applyBtn = (sd && !orderLocked)
       ? ' <button class="btn-sm shift-apply" data-d="'+d+'" title="この勤務区分の食事を入れる">反映</button>' : '';
-    html += '<td style="font-size:0.75rem;white-space:nowrap">'+esc(sh)+applyBtn+'</td>';
+    // 勤務区分はその場で手入力できる（勤務DBから取り込めない場合の入力口）
+    var shSel = '<select class="shift-sel" data-d="'+d+'"'
+              + (shiftEditAllowed() ? '' : ' disabled') + '>' + shiftOptionsHtml(sh) + '</select>';
+    html += '<td style="font-size:0.75rem;white-space:nowrap">'+shSel+applyBtn+'</td>';
     for (var k=0; k<MEAL_KEYS.length; k++) {
       var mk = MEAL_KEYS[k];
       var v = o[mk] || '';
@@ -559,6 +624,33 @@ function renderOrderGrid() {
       applyShiftToDay(parseInt(this.getAttribute('data-d'), 10));
     });
   }
+  var sels = wrap.querySelectorAll('select.shift-sel');
+  for (var i=0; i<sels.length; i++) {
+    sels[i].addEventListener('change', onOrderShiftChange);
+  }
+}
+
+// 勤務区分の手入力が可能か。受付停止中でも管理者なら入力できる
+function shiftEditAllowed() { return hAdminMode || !isOrderInputBlocked(); }
+
+// 注文入力画面で勤務区分を変更したとき
+function onOrderShiftChange() {
+  var staffId = document.getElementById('order-staff').value;
+  if (!staffId) return;
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  var d = parseInt(this.getAttribute('data-d'), 10);
+  var v = this.value;
+  setShift(staffId, y, m, d, v);
+  saveShiftDay(staffId, y, m, d, v);
+  var sd = v ? getShiftDef(v) : null;
+  // 勤務区分を入れたら、その日の食事も入れるか確認する
+  if (sd && !orderLocked && confirm(d + '日を「' + sd.name + '」にしました。\nこの勤務区分の食事を注文に反映しますか？')) {
+    applyShiftToDay(d);
+    return;
+  }
+  renderOrderGrid();
+  showToast(d + '日の勤務区分を「' + (v || '未設定') + '」にしました');
 }
 
 // 指定日の勤務区分から、必要な食事を自動で入れる
@@ -652,9 +744,11 @@ function updateOrderButtons() {
   var status = document.getElementById('order-status');
   var confirmBtn = document.getElementById('order-confirm');
   var editBtn = document.getElementById('order-edit');
+  var unconfirmBtn = document.getElementById('order-unconfirm');
   if (cfm && !orderDirty) {
     status.textContent = '確定済み'; status.className = 'order-status confirmed';
     confirmBtn.style.display = 'none'; editBtn.style.display = '';
+    editBtn.textContent = hAdminMode ? '修正（管理者）' : '修正';
   } else if (orderDirty) {
     status.textContent = '未保存の変更があります'; status.className = 'order-status unsaved';
     confirmBtn.style.display = ''; confirmBtn.textContent = '確定'; editBtn.style.display = 'none';
@@ -662,6 +756,26 @@ function updateOrderButtons() {
     status.textContent = '未確定'; status.className = 'order-status editing';
     confirmBtn.style.display = ''; confirmBtn.textContent = '確定'; editBtn.style.display = 'none';
   }
+  // 確定解除は管理者のみ、確定済みのときだけ
+  if (unconfirmBtn) unconfirmBtn.style.display = (hAdminMode && cfm) ? '' : 'none';
+}
+
+// 管理者が確定を取り消す（保護者がもう一度入力し直せるようにする）
+function unconfirmOrder() {
+  if (!hAdminMode) { showToast('管理者モードで操作してください'); return; }
+  var childId = document.getElementById('order-child').value;
+  var staffId = document.getElementById('order-staff').value;
+  if (!childId) return;
+  var y = parseInt(document.getElementById('order-year').value);
+  var m = parseInt(document.getElementById('order-month').value);
+  var c = getChildById(childId);
+  if (!confirm('【確定解除】' + (c ? c.name : childId) + ' の ' + y + '年' + m + '月の確定を取り消しますか？\n\n'
+             + '保護者が再度入力・確定できる状態に戻ります。注文の内容は消えません。')) return;
+  setOrderConfirmed(childId, y, m, false);
+  addHistory(staffId, childId, y+'-'+pad(m), '確定解除', '管理者');
+  orderLocked = false; orderDirty = false;
+  renderOrderGrid();
+  showToast('確定を解除しました');
 }
 
 function getSummaryText(childId, y, m) {
@@ -704,15 +818,16 @@ function editOrder() {
   var staffId = document.getElementById('order-staff').value;
   if (!childId) return;
   if (isOrderInputBlocked()) { showToast('現在、注文の受付を停止しています'); return; }
+  // 保育園の管理者はパスワードなしで編集できる
   var savedPw = getEditPassword();
-  if (savedPw) {
+  if (savedPw && !hAdminMode) {
     var input = prompt('編集パスワードを入力してください');
     if (input === null) return;
     if (input !== savedPw) { showToast('パスワードが正しくありません'); return; }
   }
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
-  addHistory(staffId, childId, y+'-'+pad(m), '修正開始', '');
+  addHistory(staffId, childId, y+'-'+pad(m), '修正開始', hAdminMode ? '管理者' : '');
   orderLocked = false; orderDirty = false;
   setCellsDisabled(false);
   var status = document.getElementById('order-status');
@@ -739,8 +854,11 @@ function setCellsDisabled(disabled) {
 
 // ==================== ORDER LOCK (受付停止) ====================
 var DEFAULT_LOCK_MSG = '現在、注文の受付を停止しています。変更が必要な場合は栄養科までご連絡ください。';
+function isLockOn() { return !!(config.lock && config.lock.on); }
+// 保育園の管理者は受付停止中でも注文を編集できる
 function isOrderInputBlocked() {
-  return !!(config.lock && config.lock.on);
+  if (hAdminMode) return false;
+  return isLockOn();
 }
 function getLockMessage() {
   return (config.lock && config.lock.msg) ? config.lock.msg : DEFAULT_LOCK_MSG;
@@ -748,8 +866,14 @@ function getLockMessage() {
 function renderOrderLockNotice() {
   var el = document.getElementById('order-lock-notice');
   if (!el) return;
-  if (isOrderInputBlocked()) {
+  if (isLockOn() && !hAdminMode) {
     el.textContent = '【受付停止中】' + getLockMessage();
+    el.style.display = 'block';
+  } else if (isLockOn() && hAdminMode) {
+    el.textContent = '【受付停止中】ただし管理者モードのため、この画面から注文を編集できます。';
+    el.style.display = 'block';
+  } else if (hAdminMode) {
+    el.textContent = '【管理者モード】確定済みの注文もパスワードなしで編集できます。変更は入力履歴に「管理者」と記録されます。';
     el.style.display = 'block';
   } else {
     el.style.display = 'none';
@@ -980,8 +1104,193 @@ function initMasterTab() {
   }).catch(function(){}).then(function() {
     renderPriceTable();
     renderShiftDefTable();
+    initManualShift();
     renderShiftPreview();
   });
+}
+
+// ==================== 勤務区分の手入力（月間） ====================
+function initManualShift() {
+  var ySel = document.getElementById('msh-year');
+  var mSel = document.getElementById('msh-month');
+  if (!ySel) return;
+  if (ySel.options.length === 0) {
+    var now = new Date();
+    for (var y=now.getFullYear()-1; y<=now.getFullYear()+2; y++) {
+      var o = document.createElement('option'); o.value=y; o.textContent=y; ySel.appendChild(o);
+    }
+    for (var m=1; m<=12; m++) {
+      var o2 = document.createElement('option'); o2.value=m; o2.textContent=m; mSel.appendChild(o2);
+    }
+    // 注文入力と同じく翌月を初期値にする
+    var defM = now.getMonth()+2, defY = now.getFullYear();
+    if (defM > 12) { defM = 1; defY++; }
+    ySel.value = defY; mSel.value = defM;
+  }
+  populateManualShiftStaff();
+  renderManualShiftBulkValues();
+  renderManualShiftGrid();
+}
+
+function populateManualShiftStaff() {
+  var sel = document.getElementById('msh-staff');
+  if (!sel) return;
+  var search = (document.getElementById('msh-staff-search').value || '').toLowerCase();
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">-- 選択 --</option>';
+  // 子供が登録されている保護者を先に、続けてその他の職員を並べる
+  var withChild = {};
+  for (var i=0; i<children.length; i++) withChild[children[i].staffId] = true;
+  var sorted = staffList.slice().sort(function(a,b) {
+    var aw = withChild[a.id] ? 0 : 1, bw = withChild[b.id] ? 0 : 1;
+    if (aw !== bw) return aw - bw;
+    if (a.dept < b.dept) return -1; if (a.dept > b.dept) return 1;
+    if (a.id < b.id) return -1; if (a.id > b.id) return 1; return 0;
+  });
+  for (var i=0; i<sorted.length; i++) {
+    var st = sorted[i];
+    if (search && st.id.toLowerCase().indexOf(search)===-1 &&
+        st.name.toLowerCase().indexOf(search)===-1 &&
+        (st.dept||'').toLowerCase().indexOf(search)===-1) continue;
+    var o = document.createElement('option');
+    o.value = st.id;
+    o.textContent = (withChild[st.id] ? '★ ' : '') + st.id + ' ' + st.name + '（' + (st.dept||'') + '）';
+    sel.appendChild(o);
+  }
+  sel.value = cur;
+}
+
+function renderManualShiftBulkValues() {
+  var sel = document.getElementById('msh-bulk-value');
+  if (!sel) return;
+  var cur = sel.value;
+  sel.innerHTML = shiftOptionsHtml('');
+  sel.value = cur;
+}
+
+function renderManualShiftGrid() {
+  var wrap = document.getElementById('msh-grid');
+  if (!wrap) return;
+  var staffId = document.getElementById('msh-staff').value;
+  if (!staffId) {
+    wrap.innerHTML = '<p class="placeholder-msg">保護者を選択してください</p>';
+    return;
+  }
+  if (shiftDefs.length === 0) {
+    wrap.innerHTML = '<p class="placeholder-msg">先に上の「勤務区分マスタ」に勤務区分を登録してください'
+                   + '（「標準の7区分を入れる」で作れます）。</p>';
+    return;
+  }
+  var y = parseInt(document.getElementById('msh-year').value);
+  var m = parseInt(document.getElementById('msh-month').value);
+  var days = daysInMonth(y, m);
+  var html = '<table class="data-table" style="min-width:560px"><thead><tr>'
+           + '<th>日</th><th>曜</th><th>勤務区分</th><th>この勤務で出る食事</th></tr></thead><tbody>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y, m, d);
+    var ds = y+'-'+pad(m)+'-'+pad(d);
+    var hName = getHolidayName(ds);
+    var cls = '';
+    if (hName) cls='day-holiday'; else if (dow===0) cls='day-sun'; else if (dow===6) cls='day-sat';
+    var cur = getShift(staffId, y, m, d);
+    var sd = cur ? getShiftDef(cur) : null;
+    var meals = [];
+    if (sd) {
+      for (var k=0; k<MEAL_KEYS.length; k++) {
+        if (sd.meals && sd.meals[MEAL_KEYS[k]]) meals.push(MEAL_NAMES[MEAL_KEYS[k]]);
+      }
+    }
+    var note = sd ? (meals.length ? meals.join('・') : 'なし')
+                  : (cur ? '<span style="color:#dc3545">勤務区分マスタに未登録</span>' : '');
+    html += '<tr class="'+cls+'"><td>'+d+'</td><td>'+WEEKDAYS[dow]+(hName?'<br><span style="font-size:0.7rem;color:#999">'+esc(hName)+'</span>':'')+'</td>'
+          + '<td><select class="msh-sel" data-d="'+d+'">'+shiftOptionsHtml(cur)+'</select></td>'
+          + '<td style="text-align:left;font-size:0.8rem;color:#666">'+note+'</td></tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  var sels = wrap.querySelectorAll('select.msh-sel');
+  for (var i=0; i<sels.length; i++) {
+    sels[i].addEventListener('change', function() {
+      var sid = document.getElementById('msh-staff').value;
+      var yy = parseInt(document.getElementById('msh-year').value);
+      var mm = parseInt(document.getElementById('msh-month').value);
+      var dd = parseInt(this.getAttribute('data-d'), 10);
+      setShift(sid, yy, mm, dd, this.value);
+      saveShiftDay(sid, yy, mm, dd, this.value);
+      renderManualShiftGrid();
+      setManualShiftStatus(dd + '日を「' + (this.value || '未設定') + '」にしました');
+    });
+  }
+}
+
+function setManualShiftStatus(msg, isError) {
+  var el = document.getElementById('msh-status');
+  if (!el) return;
+  el.style.color = isError ? '#dc3545' : '';
+  el.textContent = msg;
+}
+
+function manualShiftContext() {
+  var staffId = document.getElementById('msh-staff').value;
+  if (!staffId) { setManualShiftStatus('保護者を選択してください', true); return null; }
+  return {
+    staffId: staffId,
+    y: parseInt(document.getElementById('msh-year').value),
+    m: parseInt(document.getElementById('msh-month').value)
+  };
+}
+
+// 平日（土日祝を除く）にまとめて同じ勤務区分を入れる
+function manualShiftBulkWeekday() {
+  var c = manualShiftContext();
+  if (!c) return;
+  var v = document.getElementById('msh-bulk-value').value;
+  var days = daysInMonth(c.y, c.m);
+  var n = 0;
+  for (var d=1; d<=days; d++) {
+    if (!isWorkday(c.y, c.m, d)) continue;
+    setShift(c.staffId, c.y, c.m, d, v);
+    n++;
+  }
+  saveShiftStaffMonth(c.staffId, c.y, c.m);
+  renderManualShiftGrid();
+  setManualShiftStatus('平日 ' + n + '日を「' + (v || '未設定') + '」にしました');
+  showToast('平日 ' + n + '日に反映しました');
+}
+
+function manualShiftCopyPrev() {
+  var c = manualShiftContext();
+  if (!c) return;
+  var py = c.m === 1 ? c.y - 1 : c.y;
+  var pm = c.m === 1 ? 12 : c.m - 1;
+  var pym = py + '-' + pad(pm);
+  var src = (shifts[pym] && shifts[pym][c.staffId]) ? shifts[pym][c.staffId] : null;
+  if (!src) { setManualShiftStatus(py + '年' + pm + '月の勤務区分がありません', true); return; }
+  if (!confirm(py + '年' + pm + '月の勤務区分を ' + c.y + '年' + c.m + '月にコピーします。\n現在の内容は上書きされます。')) return;
+  var days = daysInMonth(c.y, c.m);
+  var n = 0;
+  for (var d=1; d<=days; d++) {
+    var v = src[String(d)] || '';
+    setShift(c.staffId, c.y, c.m, d, v);
+    if (v) n++;
+  }
+  saveShiftStaffMonth(c.staffId, c.y, c.m);
+  renderManualShiftGrid();
+  setManualShiftStatus(py + '年' + pm + '月から ' + n + '日分をコピーしました');
+  showToast('前月からコピーしました');
+}
+
+function manualShiftClear() {
+  var c = manualShiftContext();
+  if (!c) return;
+  var st = getStaffById(c.staffId);
+  if (!confirm((st ? st.name : c.staffId) + ' の ' + c.y + '年' + c.m + '月の勤務区分をすべて消します。よろしいですか？')) return;
+  var days = daysInMonth(c.y, c.m);
+  for (var d=1; d<=days; d++) setShift(c.staffId, c.y, c.m, d, '');
+  saveShiftStaffMonth(c.staffId, c.y, c.m);
+  renderManualShiftGrid();
+  setManualShiftStatus(c.y + '年' + c.m + '月の勤務区分を消しました');
+  showToast('当月の勤務区分を消しました');
 }
 
 function renderPriceTable() {
@@ -1087,6 +1396,8 @@ function saveShiftDefs() {
     if (!res || !res.ok) { statusEl.textContent = '保存に失敗しました'; alert('勤務区分の保存に失敗しました: ' + ((res&&res.error)||'不明なエラー')); return; }
     shiftDefs = next;
     statusEl.textContent = '保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）';
+    renderManualShiftBulkValues();
+    renderManualShiftGrid();
     showToast('勤務区分を保存しました');
   }).catch(function(e) { statusEl.textContent = '保存に失敗しました'; alert('勤務区分の保存に失敗しました: ' + e.message); });
 }
@@ -1110,6 +1421,8 @@ function addShiftDef(e) {
 function fillDefaultShiftDefs() {
   shiftDefs = JSON.parse(JSON.stringify(DEFAULT_SHIFT_DEFS));
   renderShiftDefTable();
+  renderManualShiftBulkValues();
+  renderManualShiftGrid();
   showToast('標準の7区分を入力しました。「勤務区分を保存」を押してください');
 }
 
@@ -1138,8 +1451,10 @@ function syncShiftsFromDb() {
       if (!res || !res.ok) {
         statusEl.style.color = '#dc3545';
         statusEl.textContent = '同期できませんでした: ' + ((res && res.error) || '不明なエラー');
+        renderProbeResult(res, true);
         alert('勤務区分の同期に失敗しました。\n\n' + ((res && res.error) || '不明なエラー') +
-              '\n\nsync_shifts.php の接続設定が未入力の場合は、CSV取込をご利用ください。');
+              '\n\n画面に詳しい原因と対処を表示しました。\n' +
+              '当面は「勤務区分の手入力」またはCSV取込をご利用ください。');
         return;
       }
       var ym = y + '-' + pad(m);
@@ -1165,14 +1480,101 @@ function syncShiftsFromDb() {
         statusEl.textContent = msg;
         showToast('勤務区分を同期しました');
         renderShiftPreview();
+        renderManualShiftGrid();
       });
     })
     .catch(function(e) {
       statusEl.style.color = '#dc3545';
       statusEl.textContent = '同期できませんでした（sync_shifts.php が見つからない可能性があります）';
+      renderProbeResult({ok:false, error:'sync_shifts.php を呼び出せませんでした: ' + e.message}, true);
       alert('勤務区分の同期に失敗しました: ' + e.message +
             '\n\nサーバーに sync_shifts.php が配置され、接続設定が済んでいるか確認してください。');
     });
+}
+
+// ==================== 勤務DBの接続テスト ====================
+function probeShiftDb() {
+  var el = document.getElementById('shift-probe-result');
+  if (el) el.innerHTML = '<p class="help-text">接続を確認しています...</p>';
+  fetch('../sync_shifts.php?probe=1&t=' + Date.now())
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + '（sync_shifts.php がサーバーにありません）');
+      return r.text();
+    })
+    .then(function(txt) {
+      var res;
+      try { res = JSON.parse(txt); }
+      catch (e) {
+        // PHPエラーがそのまま返っている場合。中身をそのまま見せる
+        renderProbeResult({ok:false, error:'sync_shifts.php が正しく動いていません', raw:txt.slice(0, 800)}, true);
+        return;
+      }
+      renderProbeResult(res, !res.ok);
+    })
+    .catch(function(e) {
+      renderProbeResult({ok:false, error:e.message}, true);
+    });
+}
+
+// 接続テスト・同期エラーの内容を画面に分かりやすく表示する
+function renderProbeResult(res, isError) {
+  var el = document.getElementById('shift-probe-result');
+  if (!el) return;
+  if (!res) { el.innerHTML = ''; return; }
+  var rows = [];
+  var add = function(k, v) { if (v !== undefined && v !== null && v !== '') rows.push([k, v]); };
+
+  if (isError) {
+    add('結果', '接続できませんでした');
+    add('エラー内容', res.error || '不明なエラー');
+    if (res.detail && res.detail.tried && res.detail.tried.length) {
+      add('試したドライバ', res.detail.tried.join(' ／ '));
+    }
+    if (res.detail && res.detail.candidates && res.detail.candidates.length) {
+      add('候補', res.detail.candidates.join(', '));
+    }
+    if (res.raw) add('サーバーの応答', res.raw);
+  } else {
+    add('結果', '接続できました');
+    add('DBの種類', res.driver);
+    add('接続先', res.dsn);
+    add('データベース', res.database);
+    add('アカウント', res.user);
+    var tbl = function(name) {
+      var t = res[name];
+      if (!t) return;
+      if (t.error) add(name, '読めません: ' + t.error);
+      else if (t.columns && t.columns.length) add(name + ' の列名', t.columns.join(', '));
+      else add(name, t.note || '列が取得できませんでした');
+    };
+    tbl('JoyKinmData'); tbl('JoyKinmu'); tbl('JoyKojin');
+  }
+
+  var html = '<table class="data-table" style="max-width:900px"><tbody>';
+  for (var i=0; i<rows.length; i++) {
+    html += '<tr><th style="width:170px;text-align:left;white-space:nowrap">' + esc(rows[i][0]) + '</th>'
+          + '<td style="text-align:left;word-break:break-all;font-size:0.8rem">' + esc(String(rows[i][1])) + '</td></tr>';
+  }
+  html += '</tbody></table>';
+
+  if (isError) {
+    html += '<div class="notice notice-warning" style="margin-top:10px">'
+          + '<strong>よくある原因と対処</strong><ul style="margin:6px 0 0 18px;line-height:1.8">'
+          + '<li><strong>ドライバが入っていない</strong> … php.ini の <code>pdo_sqlsrv</code> / <code>pdo_oci</code> / '
+          + '<code>pdo_pgsql</code> / <code>pdo_mysql</code> を有効にしてApacheを再起動してください。</li>'
+          + '<li><strong>DBサーバーに届かない</strong> … 給食サーバーからJOYNUSのDBサーバーへ接続できるか'
+          + '（ファイアウォール・ポート）をネットワーク担当にご確認ください。</li>'
+          + '<li><strong>アカウントが違う</strong> … JOYNUSの管理者に参照専用（SELECTのみ）のアカウントをご確認ください。</li>'
+          + '<li><strong>年月の形式が違う</strong> … 接続はできているのにデータが0件の場合は、'
+          + 'sync_shifts.php の <code>$KBN</code>（予定/実績）と年月の形式をご確認ください。</li>'
+          + '</ul><p style="margin:8px 0 0">'
+          + '接続できるようになるまでは、上の<strong>「勤務区分の手入力」</strong>で保護者ごとに入力できます。'
+          + '</p></div>';
+  } else {
+    html += '<p class="help-text" style="margin-top:8px">この内容（特に JoyKinmu の列名）を控えて、'
+          + 'sync_shifts.php の設定と合っているかご確認ください。</p>';
+  }
+  el.innerHTML = html;
 }
 
 function importShiftCsv() {
@@ -1224,6 +1626,7 @@ function importShiftCsv() {
             showToast('勤務区分を取り込みました');
           }
           renderShiftPreview();
+          renderManualShiftGrid();
         }
       });
     });
@@ -1817,6 +2220,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('bulk-clear').addEventListener('click', bulkClear);
     document.getElementById('order-confirm').addEventListener('click', confirmOrder);
     document.getElementById('order-edit').addEventListener('click', editOrder);
+    document.getElementById('order-unconfirm').addEventListener('click', unconfirmOrder);
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
     document.getElementById('rpt-all-excel').addEventListener('click', function(){ fetchAggregateData(exportHoikuAllExcel); });
@@ -1830,6 +2234,14 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('shiftdef-default').addEventListener('click', fillDefaultShiftDefs);
     document.getElementById('shiftdef-form').addEventListener('submit', addShiftDef);
     document.getElementById('shift-sync').addEventListener('click', syncShiftsFromDb);
+    document.getElementById('shift-probe').addEventListener('click', probeShiftDb);
+    document.getElementById('msh-staff-search').addEventListener('input', populateManualShiftStaff);
+    document.getElementById('msh-staff').addEventListener('change', renderManualShiftGrid);
+    document.getElementById('msh-year').addEventListener('change', renderManualShiftGrid);
+    document.getElementById('msh-month').addEventListener('change', renderManualShiftGrid);
+    document.getElementById('msh-bulk-weekday').addEventListener('click', manualShiftBulkWeekday);
+    document.getElementById('msh-copy-prev').addEventListener('click', manualShiftCopyPrev);
+    document.getElementById('msh-clear').addEventListener('click', manualShiftClear);
     document.getElementById('shift-csv-import').addEventListener('click', importShiftCsv);
     document.getElementById('shift-csv-export').addEventListener('click', exportShiftCsv);
     document.getElementById('shift-year').addEventListener('change', renderShiftPreview);

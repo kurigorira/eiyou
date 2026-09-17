@@ -21,6 +21,43 @@ $defaults = array(
     'shiftdefs'=>'[]', 'hoiku_config'=>'{}'
 );
 
+/**
+ * 部分更新（merge）を指定の深さまで再帰的に適用する。
+ *   depth=1 ... 第1階層のキーを置き換え   例) kensa[日]
+ *   depth=2 ... 第2階層まで              例) kensa[月][日]
+ *   depth=3 ... 第3階層まで              例) shifts[年月][職員ID][日]
+ * 値が null のキーは削除する（未割当・取消を表す）。
+ */
+function mergeAtDepth($data, $patch, $depth) {
+    if (!is_array($data)) $data = array();
+    foreach ($patch as $k => $v) {
+        if ($v === null) {
+            unset($data[$k]);
+        } elseif ($depth > 1 && is_array($v) && isset($data[$k]) && is_array($data[$k])) {
+            $data[$k] = mergeAtDepth($data[$k], $v, $depth - 1);
+        } elseif ($depth > 1 && is_array($v)) {
+            $data[$k] = mergeAtDepth(array(), $v, $depth - 1);
+        } else {
+            $data[$k] = $v;
+        }
+    }
+    return $data;
+}
+
+/**
+ * 空になった配列を JSON のオブジェクト {} として書き出すよう変換する。
+ * PHP は空の配列を [] と書き出すため、そのまま読み込むとJavaScript側で
+ * 配列として扱われ、キーを追加しても保存されなくなる。
+ * merge 対象のデータは連想配列（オブジェクト）しか入らないため、ここでまとめて直す。
+ */
+function emptyArraysToObjects($v) {
+    if (!is_array($v)) return $v;
+    if (count($v) === 0) return new stdClass();
+    $out = array();
+    foreach ($v as $k => $vv) $out[$k] = emptyArraysToObjects($vv);
+    return $out;
+}
+
 $key = isset($_GET['key']) ? $_GET['key'] : '';
 
 if ($key === 'all') {
@@ -88,29 +125,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             $data = json_decode($current, true);
             if (!is_array($data)) $data = array();
             $depth = isset($_GET['depth']) ? intval($_GET['depth']) : 1;
-            if ($depth >= 2) {
-                foreach ($decoded as $k1 => $v1) {
-                    if (!isset($data[$k1]) || !is_array($data[$k1])) $data[$k1] = array();
-                    if (is_array($v1)) {
-                        foreach ($v1 as $k2 => $v2) {
-                            if ($v2 === null) {
-                                unset($data[$k1][$k2]);
-                            } else {
-                                $data[$k1][$k2] = $v2;
-                            }
-                        }
-                    }
-                }
-            } else {
-                foreach ($decoded as $k => $v) {
-                    if ($v === null) {
-                        unset($data[$k]);
-                    } else {
-                        $data[$k] = $v;
-                    }
-                }
-            }
-            $out = json_encode($data, JSON_UNESCAPED_UNICODE);
+            if ($depth < 1) $depth = 1;
+            $data = mergeAtDepth($data, $decoded, $depth);
+            $out = json_encode(emptyArraysToObjects($data), JSON_UNESCAPED_UNICODE);
             if ($out === false) {
                 $errMsg = 'JSONエンコードに失敗しました（文字コードを確認してください）';
             } else {

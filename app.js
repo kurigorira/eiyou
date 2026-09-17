@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-17a';
+var APP_VERSION = '2026-09-17b';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
@@ -81,8 +81,8 @@ var mergeQueue = {};
 function mergePartialInto(target, src, depth) {
   for (var k in src) {
     if (depth >= 2 && src[k] && typeof src[k] === 'object' && !Array.isArray(src[k])) {
-      if (!target[k] || typeof target[k] !== 'object') target[k] = {};
-      for (var k2 in src[k]) target[k][k2] = src[k][k2];
+      if (!target[k] || typeof target[k] !== 'object' || Array.isArray(target[k])) target[k] = {};
+      mergePartialInto(target[k], src[k], depth - 1);
     } else {
       target[k] = src[k];
     }
