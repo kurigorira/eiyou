@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <title>職員給食注文管理システム</title>
-<link rel="stylesheet" href="style.css?v=20260780">
+<link rel="stylesheet" href="style.css?v=20260790">
 </head>
 <body>
 <div id="app">
@@ -23,7 +23,7 @@
       <button class="tab-btn admin-only" data-tab="backup" style="display:none">データ管理</button>
       <button class="tab-btn tab-btn-admin" id="admin-toggle">管理者</button>
       <a href="hoikuen/index.html" class="nav-link">保育園食へ</a>
-      <span id="app-version" style="font-size:0.7rem;color:#aab;align-self:center;margin-left:8px"></span>
+      <span id="app-version" style="font-size:0.75rem;color:#dde;align-self:center;margin-left:10px"></span>
     </nav>
   </header>
 
@@ -345,7 +345,33 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="xlsx.js?v=20260780"></script>
-<script src="app.js?v=20260780"></script>
+<script src="xlsx.js?v=20260790"></script>
+<script src="app.js?v=20260790"></script>
+<script>
+// プログラムが正しく更新されていない場合に画面上で知らせる自己診断。
+// app.js が古い版だと必須の関数が無く、分かりにくいエラーになるため。
+(function() {
+  var need = ['fmtDate', 'pad', 'emptyMeal', 'getOrder', 'getStaffById', 'renderTodayInner'];
+  var missing = [];
+  for (var i = 0; i < need.length; i++) {
+    if (typeof window[need[i]] !== 'function') missing.push(need[i]);
+  }
+  if (missing.length === 0) return;
+  var ver = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '(バージョン情報なし＝かなり古い版)';
+  var show = function() {
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc3545;color:#fff;'
+                    + 'padding:16px 20px;font-size:15px;line-height:1.8;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+    d.innerHTML = '<strong style="font-size:17px">プログラムが最新版ではありません</strong><br>'
+      + 'サーバーの app.js が古いため、正しく動作しません。<br>'
+      + '<span style="font-size:13px;opacity:.9">読み込まれた版: ' + ver
+      + '　／　不足している機能: ' + missing.join(', ') + '</span><br>'
+      + '<strong>対処:</strong> サーバーに最新の app.js を上書きしてから、この画面で <strong>Ctrl+F5</strong> を押してください。';
+    document.body.insertBefore(d, document.body.firstChild);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+  else show();
+})();
+</script>
 </body>
 </html>
