@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-17b';
+var APP_VERSION = '2026-09-24a';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1525,14 +1525,15 @@ function renderProbeResult(res, isError) {
   var add = function(k, v) { if (v !== undefined && v !== null && v !== '') rows.push([k, v]); };
 
   if (isError) {
+    var dt = res.detail || {};
     add('結果', '接続できませんでした');
     add('エラー内容', res.error || '不明なエラー');
-    if (res.detail && res.detail.tried && res.detail.tried.length) {
-      add('試したドライバ', res.detail.tried.join(' ／ '));
-    }
-    if (res.detail && res.detail.candidates && res.detail.candidates.length) {
-      add('候補', res.detail.candidates.join(', '));
-    }
+    add('接続先', dt.host);
+    add('データベース', dt.database);
+    add('アカウント', dt.user ? (dt.user + (dt.hasPassword ? '（パスワードあり）' : '（パスワードなし）')) : '');
+    add('PHPで使えるドライバ', dt.drivers);
+    if (dt.tried && dt.tried.length) add('試した接続', dt.tried.join('\n'));
+    if (dt.candidates && dt.candidates.length) add('候補', dt.candidates.join(', '));
     if (res.raw) add('サーバーの応答', res.raw);
   } else {
     add('結果', '接続できました');
@@ -1552,10 +1553,21 @@ function renderProbeResult(res, isError) {
 
   var html = '<table class="data-table" style="max-width:900px"><tbody>';
   for (var i=0; i<rows.length; i++) {
+    // 改行はそのまま見せる（複数の接続を試した内容を1行ずつ読めるように）
     html += '<tr><th style="width:170px;text-align:left;white-space:nowrap">' + esc(rows[i][0]) + '</th>'
-          + '<td style="text-align:left;word-break:break-all;font-size:0.8rem">' + esc(String(rows[i][1])) + '</td></tr>';
+          + '<td style="text-align:left;word-break:break-all;font-size:0.8rem;white-space:pre-line">'
+          + esc(String(rows[i][1])) + '</td></tr>';
   }
   html += '</tbody></table>';
+
+  // サーバー側が原因を特定できた場合は、それを最優先で見せる
+  var hints = (res.detail && res.detail.hints) ? res.detail.hints : [];
+  if (isError && hints.length) {
+    html += '<div class="notice notice-warning" style="margin-top:10px;border-color:#dc3545;background:#fdecea">'
+          + '<strong>この内容から考えられる原因</strong><ul style="margin:6px 0 0 18px;line-height:1.8">';
+    for (var i=0; i<hints.length; i++) html += '<li>' + esc(hints[i]) + '</li>';
+    html += '</ul></div>';
+  }
 
   if (isError) {
     html += '<div class="notice notice-warning" style="margin-top:10px">'

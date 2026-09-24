@@ -521,15 +521,35 @@ JOYNUS II の `JoyKinmData`（勤務データ）から、職員ごと・日ご�
 
 - **つながった場合**: DBの種類・接続先・`JoyKinmData` / `JoyKinmu` / `JoyKojin` の**実際の列名**が出ます。
   `JoyKinmu` の列名を確認し、`sync_shifts.php` の `$KINMU_CD_COL` / `$KINMU_NAME_COL` を合わせてください。
-- **つながらない場合**: 試したドライバごとのエラー内容と、よくある原因・対処が出ます。
+- **つながらない場合**: 接続先・アカウント・**試した接続ごとのエラー内容**に加えて、
+  そのエラー文から判断した **「この内容から考えられる原因」** が赤枠で表示されます。
+
+SQL Server は接続の書き方で失敗しやすいため、次の3通りを自動で順に試します。
+どれで成功したかは接続テストの「接続先」欄に出ます。
+
+| 試す順 | 内容 | 効く場面 |
+|-------|------|---------|
+| ① 標準 | 通常の接続 | ふつうはこれで繋がります |
+| ② サーバー証明書を検証しない | `TrustServerCertificate=1` | ODBC Driver 18以降で証明書エラーになる場合 |
+| ③ 暗号化なし | `Encrypt=0` | 暗号化を使っていないSQL Serverの場合 |
+
+`pdo_sqlsrv` が無い環境では ODBC 経由（Driver 17 → 旧SQL Serverドライバ）も試します。
 
 | 表示されるエラー | 原因 | 対処 |
 |-----------------|------|------|
 | 利用できるデータベースドライバがPHPに入っていません | PHPにDBドライバが未導入 | php.ini の `pdo_sqlsrv` / `pdo_oci` / `pdo_pgsql` / `pdo_mysql` を有効にしてApacheを再起動 |
-| `Connection timed out` / `connection failed` | DBサーバーに届いていない | ファイアウォール・ポート・IPアドレスをネットワーク担当に確認 |
-| `Login failed` / `authentication failed` | アカウントが違う | JOYNUSの管理者に参照専用（SELECTのみ）のアカウントを確認 |
+| `IMSSP: An unsupported attribute was designated` | `sync_shifts.php` が古い版 | 最新の `sync_shifts.php` に入れ替える |
+| `Connection timed out` / `[2002]` / `08001` | DBサーバーに届いていない | ファイアウォール・ポート（SQL Serverは既定1433）・IPアドレスを確認。名前付きインスタンスなら `$DB_HOST` を `10.20.1.36\インスタンス名` にする |
+| `18456` / `Login failed for user` | アカウントかパスワードが違う | JOYNUSの管理者に参照専用（SELECTのみ）のアカウントとパスワードを確認 |
+| `certificate` / `SSL Provider` | 証明書で弾かれている | ②③が自動で試されます。それでも駄目ならJOYNUS側の暗号化設定を確認 |
+| `4060` / `Cannot open database` | DB名が違う、または権限がない | データベース名とアカウントの権限を確認 |
 | 接続はできるがデータが0件 | 年月の形式・勤務データ区分が違う | `$KBN`（予定/実績）と `$YYMM_FORMAT` を確認 |
 | `Invalid object name 'JoyKinmData'` | テーブル名が違う | JOYNUSの管理者にテーブル名を確認 |
+
+> **パスワードが空欄の場合の注意**
+> SQL Server は、ユーザー名だけでパスワードが空欄だと **Windows認証**（Apacheの実行アカウント）で
+> 接続しようとすることがあります。SQL Server認証のアカウントを使う場合は、
+> `$DB_PASS` にパスワードを設定してください。
 
 **ブラウザから直接確認する方法**
 

@@ -106,45 +106,125 @@ function fail($msg, $extra = null) {
     exit;
 }
 
-/** 設定から接続文字列の候補を組み立てる */
+/** 設定から接続文字列の候補を組み立てる
+ *  SQL Server は接続オプションの違いで失敗しやすいため、複数の書き方を順に試す。
+ *  戻り値: array( array('driver'=>..., 'dsn'=>..., 'label'=>...), ... ) */
 function buildDsnCandidates($type, $host, $port, $name) {
     $avail = PDO::getAvailableDrivers();
-    $mk = array(
-        'sqlsrv' => 'sqlsrv:Server=' . $host . ($port ? ',' . $port : '') . ';Database=' . $name
-                  . ';LoginTimeout=' . CONNECT_TIMEOUT,
-        'pgsql'  => 'pgsql:host=' . $host . ';port=' . ($port ? $port : '5432') . ';dbname=' . $name
-                  . ';connect_timeout=' . CONNECT_TIMEOUT,
-        'mysql'  => 'mysql:host=' . $host . ';port=' . ($port ? $port : '3306') . ';dbname=' . $name . ';charset=utf8mb4',
-        'oci'    => 'oci:dbname=//' . $host . ':' . ($port ? $port : '1521') . '/' . $name . ';charset=AL32UTF8',
-        // SQL Server は sqlsrv が無い環境で ODBC 経由になることがある
-        'odbc'   => 'odbc:Driver={SQL Server};Server=' . $host . ';Database=' . $name,
+    $srv   = $host . ($port ? ',' . $port : '');
+
+    $mk = array();
+
+    // --- SQL Server (Microsoft製 pdo_sqlsrv) ---
+    // ODBC Driver 18 以降は既定で暗号化必須になり、証明書が院内発行だと
+    // 「SSL Provider ... certificate chain」で弾かれる。順に緩めて試す。
+    $mk['sqlsrv'] = array(
+        array('dsn' => 'sqlsrv:Server=' . $srv . ';Database=' . $name . ';LoginTimeout=' . CONNECT_TIMEOUT,
+              'label' => '標準'),
+        array('dsn' => 'sqlsrv:Server=' . $srv . ';Database=' . $name . ';LoginTimeout=' . CONNECT_TIMEOUT
+                     . ';TrustServerCertificate=1',
+              'label' => 'サーバー証明書を検証しない'),
+        array('dsn' => 'sqlsrv:Server=' . $srv . ';Database=' . $name . ';LoginTimeout=' . CONNECT_TIMEOUT
+                     . ';Encrypt=0;TrustServerCertificate=1',
+              'label' => '暗号化なし'),
     );
+
+    // --- SQL Server (ODBC経由。pdo_sqlsrv が無い環境向け) ---
+    $mk['odbc'] = array(
+        array('dsn' => 'odbc:Driver={ODBC Driver 17 for SQL Server};Server=' . $srv . ';Database=' . $name
+                     . ';TrustServerCertificate=yes',
+              'label' => 'ODBC Driver 17'),
+        array('dsn' => 'odbc:Driver={SQL Server};Server=' . $srv . ';Database=' . $name,
+              'label' => 'SQL Server（旧ドライバ）'),
+    );
+
+    $mk['pgsql'] = array(
+        array('dsn' => 'pgsql:host=' . $host . ';port=' . ($port ? $port : '5432') . ';dbname=' . $name
+                     . ';connect_timeout=' . CONNECT_TIMEOUT, 'label' => '標準'),
+    );
+    $mk['mysql'] = array(
+        array('dsn' => 'mysql:host=' . $host . ';port=' . ($port ? $port : '3306') . ';dbname=' . $name
+                     . ';charset=utf8mb4', 'label' => '標準'),
+    );
+    $mk['oci'] = array(
+        array('dsn' => 'oci:dbname=//' . $host . ':' . ($port ? $port : '1521') . '/' . $name
+                     . ';charset=AL32UTF8', 'label' => '標準'),
+    );
+
     $order = ($type === 'auto') ? array('sqlsrv', 'odbc', 'oci', 'pgsql', 'mysql') : array($type);
     $out = array();
     foreach ($order as $d) {
         if (!isset($mk[$d])) continue;
         if (!in_array($d, $avail)) continue;   // 未導入のドライバは試さない
-        $out[$d] = $mk[$d];
+        foreach ($mk[$d] as $c) {
+            $out[] = array('driver' => $d, 'dsn' => $c['dsn'], 'label' => $d . '（' . $c['label'] . '）');
+        }
     }
     return $out;
 }
 
+/** 接続時に渡すPDOオプション。
+ *  pdo_sqlsrv は PDO::ATTR_TIMEOUT を受け付けず
+ *  「SQLSTATE[IMSSP]: An unsupported attribute was designated on the PDO object.」
+ *  で失敗するため、ドライバごとに渡すものを変える。
+ *  接続待ち時間はDSNの LoginTimeout で指定している。 */
+function pdoOptionsFor($driver) {
+    $opt = array(PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION);
+    if ($driver !== 'sqlsrv' && $driver !== 'odbc') {
+        $opt[PDO::ATTR_TIMEOUT] = CONNECT_TIMEOUT;
+    }
+    return $opt;
+}
+
 /** 候補を順に試して接続する */
-function connectDb($cands, $user, $pass, &$usedDriver, &$tried) {
-    foreach ($cands as $drv => $dsn) {
+function connectDb($cands, $user, $pass, &$usedDriver, &$tried, &$usedDsn) {
+    foreach ($cands as $c) {
+        $drv = $c['driver'];
         try {
-            $pdo = new PDO($dsn, $user, $pass, array(
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_TIMEOUT => CONNECT_TIMEOUT,
-            ));
+            $pdo = new PDO($c['dsn'], $user, $pass, pdoOptionsFor($drv));
+            // 取得形式は接続後に設定する（コンストラクタで渡すとドライバによっては弾かれる）
+            try { $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC); } catch (Exception $e) {}
             $usedDriver = $drv;
+            $usedDsn    = $c['dsn'];
             return $pdo;
         } catch (Exception $e) {
-            $tried[] = $drv . ': ' . $e->getMessage();
+            $tried[] = $c['label'] . ': ' . $e->getMessage();
         }
     }
     return null;
+}
+
+/** 接続エラーの文面から、具体的な対処を日本語で組み立てる */
+function hintsForErrors($tried, $user, $pass) {
+    $all = implode(' / ', $tried);
+    $h = array();
+    if (strpos($all, 'IMSSP') !== false && strpos($all, 'unsupported attribute') !== false) {
+        $h[] = 'このメッセージが出る場合、sync_shifts.php が古い版です。最新に入れ替えてください。';
+    }
+    if (strpos($all, '18456') !== false || stripos($all, 'Login failed for user') !== false) {
+        $h[] = 'アカウントかパスワードが違います。JOYNUSの管理者に、参照専用（SELECTのみ）の'
+             . 'SQL Server認証アカウントとパスワードをご確認ください。'
+             . ($pass === '' ? '（現在パスワードは未設定です。SQL Server認証ではパスワードが必要なことがほとんどです）' : '');
+    }
+    if (stripos($all, 'certificate') !== false || strpos($all, 'SSL Provider') !== false) {
+        $h[] = 'サーバー証明書で弾かれています。本スクリプトは自動で'
+             . ' TrustServerCertificate / Encrypt=0 も試します。それでも駄目な場合は'
+             . 'JOYNUS側の暗号化設定をご確認ください。';
+    }
+    if (strpos($all, '08001') !== false || stripos($all, 'server was not found') !== false
+        || strpos($all, '2002') !== false || stripos($all, 'timeout') !== false) {
+        $h[] = '給食サーバーからDBサーバーへ届いていません。IPアドレス・ポート（SQL Serverは既定1433）・'
+             . 'ファイアウォールをネットワーク担当にご確認ください。'
+             . '名前付きインスタンスの場合は $DB_HOST を「10.20.1.36\\インスタンス名」の形にします。';
+    }
+    if (stripos($all, 'Cannot open database') !== false || strpos($all, '4060') !== false) {
+        $h[] = 'データベース名が違うか、そのアカウントに参照権限がありません。';
+    }
+    if ($user !== '' && $pass === '') {
+        $h[] = 'パスワードが空欄のため、SQL Serverでは Windows認証（Apacheの実行アカウント）で'
+             . '接続を試みることがあります。SQL Server認証を使う場合は $DB_PASS にパスワードを設定してください。';
+    }
+    return $h;
 }
 
 /** テーブル名・列名をDBの種類に合わせて引用符で囲む
@@ -267,11 +347,23 @@ if (count($cands) === 0) {
 }
 
 $usedDriver = '';
+$usedDsn    = '';
 $tried = array();
-$pdo = connectDb($cands, $DB_USER, $DB_PASS, $usedDriver, $tried);
+$labels = array();
+foreach ($cands as $c) $labels[] = $c['label'];
+$pdo = connectDb($cands, $DB_USER, $DB_PASS, $usedDriver, $tried, $usedDsn);
 if ($pdo === null) {
     fail('データベースに接続できませんでした。サーバーアドレス・DBの種類・アカウントをご確認ください。',
-         array('tried' => $tried, 'candidates' => array_keys($cands)));
+         array(
+             'tried'      => $tried,
+             'candidates' => $labels,
+             'hints'      => hintsForErrors($tried, $DB_USER, $DB_PASS),
+             'host'       => $DB_HOST . ($DB_PORT ? ':' . $DB_PORT : ''),
+             'database'   => $DB_NAME,
+             'user'       => $DB_USER,
+             'hasPassword'=> ($DB_PASS !== ''),
+             'drivers'    => implode(', ', PDO::getAvailableDrivers()),
+         ));
 }
 
 /* ---------- 調査モード: 接続確認とテーブルの列名を表示 ---------- */
@@ -280,7 +372,7 @@ if ($probe) {
         'ok'          => true,
         'mode'        => 'probe',
         'driver'      => $usedDriver,
-        'dsn'         => $cands[$usedDriver],
+        'dsn'         => $usedDsn,
         'database'    => $DB_NAME,
         'user'        => $DB_USER,
         'JoyKinmData' => probeColumns($pdo, $usedDriver, $KINMDATA_TABLE),
