@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-24c';
+var APP_VERSION = '2026-09-24d';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1457,6 +1457,17 @@ function syncShiftsFromDb() {
               '当面は「勤務区分の手入力」またはCSV取込をご利用ください。');
         return;
       }
+      // 取り込めた場合でも、古い版が残っていれば知らせる
+      if (res.version !== EXPECTED_SYNC_VERSION) {
+        var pe = document.getElementById('shift-probe-result');
+        if (pe) {
+          pe.innerHTML = '<div class="notice" style="background:#dc3545;color:#fff;border:none;line-height:1.8">'
+            + '<strong>サーバーの sync_shifts.php が古い版です</strong><br>'
+            + 'サーバー上の版: ' + esc(res.version || '(版の表示なし)')
+            + '　／　この画面が想定する版: ' + esc(EXPECTED_SYNC_VERSION) + '<br>'
+            + '最新の sync_shifts.php をサーバーに上書きしてください。</div>';
+        }
+      }
       var ym = y + '-' + pad(m);
       saveShiftsForMonth(ym, res.shifts || {}, function(err) {
         if (err) { statusEl.style.color = '#dc3545'; statusEl.textContent = '保存に失敗: ' + err; return; }
@@ -1516,11 +1527,31 @@ function probeShiftDb() {
     });
 }
 
+// この画面が想定している sync_shifts.php の版。
+// サーバーのファイルが古いと、直したはずの不具合が再発するため照合する。
+var EXPECTED_SYNC_VERSION = '2026-09-24c';
+
 // 接続テスト・同期エラーの内容を画面に分かりやすく表示する
 function renderProbeResult(res, isError) {
   var el = document.getElementById('shift-probe-result');
   if (!el) return;
   if (!res) { el.innerHTML = ''; return; }
+
+  // サーバーの sync_shifts.php が古い版なら、まずそれを知らせる
+  var verWarn = '';
+  if (!res.raw) {
+    var sv = res.version || '';
+    if (sv !== EXPECTED_SYNC_VERSION) {
+      verWarn = '<div class="notice" style="margin-bottom:10px;background:#dc3545;color:#fff;'
+              + 'border:none;line-height:1.8">'
+              + '<strong style="font-size:1.05rem">サーバーの sync_shifts.php が古い版です</strong><br>'
+              + 'サーバー上の版: ' + esc(sv || '(版の表示なし＝かなり古い版)')
+              + '　／　この画面が想定する版: ' + esc(EXPECTED_SYNC_VERSION) + '<br>'
+              + '<strong>対処:</strong> 最新の <code>sync_shifts.php</code> をサーバーに上書きしてから、'
+              + 'もう一度お試しください。下に出ているエラーは、古い版が原因の可能性があります。'
+              + '</div>';
+    }
+  }
   var rows = [];
   var add = function(k, v) { if (v !== undefined && v !== null && v !== '') rows.push([k, v]); };
 
@@ -1566,7 +1597,9 @@ function renderProbeResult(res, isError) {
     }
   }
 
-  var html = '<table class="data-table" style="max-width:900px"><tbody>';
+  add('sync_shifts.php の版', res.version || '(版の表示なし)');
+
+  var html = verWarn + '<table class="data-table" style="max-width:900px"><tbody>';
   for (var i=0; i<rows.length; i++) {
     // 改行はそのまま見せる（複数の接続を試した内容を1行ずつ読めるように）
     html += '<tr><th style="width:170px;text-align:left;white-space:nowrap">' + esc(rows[i][0]) + '</th>'

@@ -540,6 +540,7 @@ SQL Server は接続の書き方で失敗しやすいため、次の3通りを�
 |-----------------|------|------|
 | 利用できるデータベースドライバがPHPに入っていません | PHPにDBドライバが未導入 | php.ini の `pdo_sqlsrv` / `pdo_oci` / `pdo_pgsql` / `pdo_mysql` を有効にしてApacheを再起動 |
 | `IMSSP: An unsupported attribute was designated` | `sync_shifts.php` が古い版 | 最新の `sync_shifts.php` に入れ替える |
+| `列名 'YYMM' が無効です` / `42S22` | `sync_shifts.php` が古い版 | 最新の `sync_shifts.php` に入れ替える（最新版は列名を自動で解決します） |
 | `Connection timed out` / `[2002]` / `08001` | DBサーバーに届いていない | ファイアウォール・ポート（SQL Serverは既定1433）・IPアドレスを確認。名前付きインスタンスなら `$DB_HOST` を `10.20.1.36\インスタンス名` にする |
 | `18456` / `Login failed for user` | アカウントかパスワードが違う | JOYNUSの管理者に参照専用（SELECTのみ）のアカウントとパスワードを確認 |
 | `certificate` / `SSL Provider` | 証明書で弾かれている | ②③が自動で試されます。それでも駄目ならJOYNUS側の暗号化設定を確認 |
@@ -574,6 +575,19 @@ JoyKinmData の列名（[joynus].[JoyKinmData]）: YYMM, Busyo, Kojin, Kbn, Kinm
 > `sa` は SQL Server の最上位管理者アカウントです。給食システムから使うのは避け、
 > **参照専用（SELECTのみ）のアカウント**をJOYNUSの管理者に発行してもらってください。
 > `sa` で接続していると、接続テストに注意書きが表示されます。
+
+#### sync_shifts.php の版の確認
+
+接続テストの結果には **「sync_shifts.php の版」** が表示されます。
+サーバーのファイルが古いと、直したはずの不具合が再発するため、
+画面が想定する版と違う場合は**赤い帯で警告**が出ます。
+
+> **サーバーの sync_shifts.php が古い版です**
+> サーバー上の版: (版の表示なし＝かなり古い版) ／ この画面が想定する版: 2026-09-24c
+> **対処:** 最新の `sync_shifts.php` をサーバーに上書きしてから、もう一度お試しください。
+
+この帯が出ている間は、下に表示されているエラーの内容よりも**まずファイルの差し替え**を
+行ってください。古い版が原因でエラーが出ている可能性があります。
 
 #### 列名の自動解決
 

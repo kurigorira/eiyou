@@ -93,6 +93,10 @@ $KINMDATA_TABLE = 'JoyKinmData';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, no-store');
 
+// このファイルの版。画面に表示され、古い版がサーバーに残っている場合に警告する。
+// 内容を変更したら必ず更新すること。
+define('SYNC_VERSION', '2026-09-24c');
+
 // 1つのドライバを試す際の接続待ち時間（秒）。順に試すので短めにする。
 define('CONNECT_TIMEOUT', 5);
 
@@ -100,7 +104,7 @@ $debug = isset($_GET['debug']) && $_GET['debug'] == '1';
 $probe = isset($_GET['probe']) && $_GET['probe'] == '1';
 
 function fail($msg, $extra = null) {
-    $out = array('ok' => false, 'error' => $msg);
+    $out = array('ok' => false, 'error' => $msg, 'version' => SYNC_VERSION);
     if ($extra !== null) $out['detail'] = $extra;
     echo json_encode($out, JSON_UNESCAPED_UNICODE);
     exit;
@@ -645,6 +649,7 @@ if ($probe) {
     echo json_encode(array(
         'ok'          => true,
         'mode'        => 'probe',
+        'version'     => SYNC_VERSION,
         'driver'      => $usedDriver,
         'dsn'         => $usedDsn,
         'database'    => $DB_NAME,
@@ -758,8 +763,11 @@ try {
 } catch (Exception $e) {
     fail('勤務データの取得に失敗しました: ' . $e->getMessage(),
          array('driver' => $usedDriver, 'table' => $qKinm,
-               'hints' => array($tKinm === null ? tableNotFoundNote($KINMDATA_TABLE, $catalog, $DB_NAME)
-                                                : '表は見つかっています。列名（YYMM / Busyo / Kojin / Kbn / KinmuTbl）をご確認ください。')));
+               'hints' => array(
+                   $tKinm === null ? tableNotFoundNote($KINMDATA_TABLE, $catalog, $DB_NAME)
+                                   : '表は見つかっています。使う列: 年月=' . $cYm . ' / 個人CD=' . $cKojin
+                                     . ' / 区分=' . $cKbn . ' / 勤務表=' . $cTbl,
+                   'この表の列: ' . implode(', ', $colsKinm))));
 }
 
 if (count($rows) === 0) {
@@ -822,6 +830,7 @@ foreach ($unmapped as $cd => $nm) $unmappedList[] = array('個人CD' => $cd, '�
 
 $res = array(
     'ok'          => true,
+    'version'     => SYNC_VERSION,
     'shifts'      => $out,
     'count'       => $count,
     'staffCount'  => count($out),
