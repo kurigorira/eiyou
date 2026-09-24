@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-24b';
+var APP_VERSION = '2026-09-24c';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1551,6 +1551,12 @@ function renderProbeResult(res, isError) {
       else add(name, (t.note || '列が取得できませんでした') + where);
     };
     tbl('JoyKinmData'); tbl('JoyKinmu'); tbl('JoyKojin');
+    // どの列を使うことにしたか（列名の大文字小文字違いを自動で吸収している）
+    if (res.usedColumns) {
+      var uc = [];
+      for (var k in res.usedColumns) uc.push(k + ' … ' + res.usedColumns[k]);
+      add('実際に使う列', uc.join('\n'));
+    }
     // 目的の表が見つからない場合に備えて、このDBにある表を見せる
     if (res.tables && res.tables.length) {
       add('このDBにある表（' + (res.tableCount || res.tables.length) + '個）', res.tables.join(', '));
@@ -1600,8 +1606,29 @@ function renderProbeResult(res, isError) {
           + '接続できるようになるまでは、上の<strong>「勤務区分の手入力」</strong>で保護者ごとに入力できます。'
           + '</p></div>';
   } else {
-    html += '<p class="help-text" style="margin-top:8px">この内容（特に JoyKinmu の列名）を控えて、'
-          + 'sync_shifts.php の設定と合っているかご確認ください。</p>';
+    // 勤務種類マスタの中身。どの列が「Ａ」「夕診」等の名称かを目で確認できる
+    if (res.kinmuRows && res.kinmuRows.length) {
+      var cols = [];
+      for (var i=0; i<res.kinmuRows.length; i++) {
+        for (var k in res.kinmuRows[i]) if (cols.indexOf(k) === -1) cols.push(k);
+      }
+      html += '<div style="margin-top:12px"><strong>勤務種類マスタの中身（先頭' + res.kinmuRows.length + '件）</strong>'
+            + '<p class="help-text">「Ａ」「ＡＭ」「夕診」などの名称が入っている列が、勤務区分の表示名です。'
+            + '上の「実際に使う列」の表示名が違っていたら、その列名を教えてください。</p>'
+            + '<div style="overflow-x:auto"><table class="data-table" style="font-size:0.78rem"><thead><tr>';
+      for (var i=0; i<cols.length; i++) html += '<th>' + esc(cols[i]) + '</th>';
+      html += '</tr></thead><tbody>';
+      for (var i=0; i<res.kinmuRows.length; i++) {
+        html += '<tr>';
+        for (var j=0; j<cols.length; j++) {
+          html += '<td>' + esc(res.kinmuRows[i][cols[j]] || '') + '</td>';
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table></div></div>';
+    }
+    html += '<p class="help-text" style="margin-top:8px">「実際に使う列」が正しければ、'
+          + '「データベースから同期」を押してください。</p>';
   }
   el.innerHTML = html;
 }

@@ -269,6 +269,55 @@ function loadTableCatalog($pdo, $driver = '', $dbName = '') {
     return $out;
 }
 
+/** 表の実際の列名を取得する
+ *  DBの照合順序によっては大文字小文字が区別されるため（'YYMM' と 'yymm' は別物）、
+ *  決め打ちせず実物の綴りを使う。 */
+function loadColumns($pdo, $driver, $db, $t, $qualified) {
+    $cols = array();
+    if ($t !== null) {
+        try {
+            $prefix = ($driver === 'sqlsrv' || $driver === 'odbc') ? qid($driver, $db) . '.' : '';
+            $sql = 'SELECT COLUMN_NAME FROM ' . $prefix . 'INFORMATION_SCHEMA.COLUMNS'
+                 . ' WHERE TABLE_NAME = ' . $pdo->quote($t['name']);
+            if ($t['schema'] !== '') $sql .= ' AND TABLE_SCHEMA = ' . $pdo->quote($t['schema']);
+            foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_NUM) as $r) $cols[] = (string)$r[0];
+        } catch (Exception $e) {}
+    }
+    if (count($cols) === 0) {
+        // 一覧が引けない場合は1行読んで列名を得る
+        try {
+            $st  = $pdo->query('SELECT * FROM ' . $qualified);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            $st->closeCursor();
+            if (is_array($row)) $cols = array_keys($row);
+        } catch (Exception $e) {}
+    }
+    return $cols;
+}
+
+/** 実際の列名の中から、候補に合うものを探す（大文字小文字は無視）
+ *  $candidates は優先順の配列。見つからなければ空文字を返す。 */
+function findCol($cols, $candidates, $allowPartial = false) {
+    $cand = array();
+    foreach ((array)$candidates as $c) { $c = trim((string)$c); if ($c !== '') $cand[] = $c; }
+    foreach ($cand as $want) {
+        foreach ($cols as $c) if (strcasecmp($c, $want) === 0) return $c;
+    }
+    if ($allowPartial) {
+        foreach ($cand as $want) {
+            foreach ($cols as $c) if (stripos($c, $want) !== false) return $c;
+        }
+    }
+    return '';
+}
+
+/** 必要な列が揃っているか調べ、足りないものを返す */
+function missingCols($map) {
+    $miss = array();
+    foreach ($map as $label => $col) if ($col === '') $miss[] = $label;
+    return $miss;
+}
+
 /** SQL Server で、同じサーバー上の他のデータベースを一覧する */
 function listDatabases($pdo, $driver) {
     $out = array();
@@ -341,11 +390,12 @@ function normName($s) {
 /** JoyKojin から 個人CD => [氏名, 在籍状態] を読む。$table は修飾済みの表名 */
 function loadKojin($pdo, $driver, $table, $cdCol, $nameCol, $stateCol) {
     $out = array();
+    if ($cdCol === '' || $nameCol === '') return $out;   // 列が特定できない場合は読まない
     try {
         $sql = 'SELECT ' . qid($driver,$cdCol) . ' AS "cd", ' . qid($driver,$nameCol) . ' AS "nm"';
         if ($stateCol) $sql .= ', ' . qid($driver,$stateCol) . ' AS "st"';
         $sql .= ' FROM ' . $table;
-        foreach ($pdo->query($sql)->fetchAll() as $r) {
+        foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $cd = trim((string)$r['cd']);
             if ($cd === '') continue;
             $out[$cd] = array(
@@ -516,6 +566,30 @@ $qKinm  = qfound($usedDriver, $tKinm,  $KINMDATA_TABLE, $foundDb, $DB_NAME);
 $qKinmu = qfound($usedDriver, $tKinmu, $KINMU_TABLE,    $foundDb, $DB_NAME);
 $qKojin = qfound($usedDriver, $tKojin, $KOJIN_TABLE,    $foundDb, $DB_NAME);
 
+/* ---------- 列名を実物から解決する ----------
+ * DBの照合順序によっては 'YYMM' と 'yymm' が別物として扱われるため、
+ * 設定の綴りをそのまま使わず、実際の列名に合わせる。 */
+$colsKinm  = loadColumns($pdo, $usedDriver, $foundDb, $tKinm,  $qKinm);
+$colsKinmu = loadColumns($pdo, $usedDriver, $foundDb, $tKinmu, $qKinmu);
+$colsKojin = loadColumns($pdo, $usedDriver, $foundDb, $tKojin, $qKojin);
+
+// 勤務データ（JoyKinmData）
+$cYm    = findCol($colsKinm, array('YYMM', 'ym', 'nengetsu'));
+$cBusyo = findCol($colsKinm, array('Busyo', 'busho', 'busyocd'));
+$cKojin = findCol($colsKinm, array('Kojin', 'kojincd', 'kojincode'));
+$cKbn   = findCol($colsKinm, array('Kbn', 'kubun', 'datakbn'));
+$cTbl   = findCol($colsKinm, array('KinmuTbl', 'kinmutable', 'kinmu_tbl'));
+
+// 勤務種類マスタ（JoyKinmu）。設定値を最優先にしつつ、実際にありがちな名前も試す
+$cKinmuCd   = findCol($colsKinmu, array($KINMU_CD_COL, 'Kinmu', 'code', 'cd', 'kinmucd'));
+$cKinmuName = findCol($colsKinmu, array($KINMU_NAME_COL, 'Ryaku', 'ryakugo1', 'ryakugo2',
+                                        'kjnam', 'kjname', 'name', 'kinmuname'));
+
+// 個人マスタ（JoyKojin）
+$cKojinCd    = findCol($colsKojin, array($KOJIN_CD_COL, 'Code', 'kojin', 'kojincd'));
+$cKojinName  = findCol($colsKojin, array($KOJIN_NAME_COL, 'KjName', 'kjnam', 'name'));
+$cKojinState = findCol($colsKojin, array($KOJIN_STATE_COL, 'KyutaiKbn', 'kyutai'));
+
 /* ---------- 調査モード: 接続確認とテーブルの列名を表示 ---------- */
 if ($probe) {
     $tableList = array();
@@ -533,6 +607,41 @@ if ($probe) {
         $notes[] = '【ご注意】sa は SQL Server の最上位管理者アカウントです。'
                  . '給食システムからは参照専用（SELECTのみ）のアカウントに変更してください。';
     }
+    // 必要な列が見つかったかを確認する
+    $miss = missingCols(array(
+        '年月(YYMM)' => $cYm, '部署(Busyo)' => $cBusyo, '個人CD(Kojin)' => $cKojin,
+        '区分(Kbn)' => $cKbn, '勤務表(KinmuTbl)' => $cTbl,
+    ));
+    if ($tKinm !== null && count($miss) > 0) {
+        $notes[] = $KINMDATA_TABLE . ' に必要な列が見つかりません: ' . implode(' / ', $miss)
+                 . '（この表の列: ' . implode(', ', $colsKinm) . '）';
+    }
+    if ($tKinmu !== null && ($cKinmuCd === '' || $cKinmuName === '')) {
+        $notes[] = $KINMU_TABLE . ' の勤務CD・表示名の列を特定できません。'
+                 . '下の「勤務種類マスタの中身」を見て、どの列が Ａ／ＡＭ／夕診 などの名称かをご確認ください。';
+    }
+
+    // 勤務種類マスタの中身を見せる。どの列が表示名かを目で確認できるようにする。
+    $kinmuRows = array();
+    if ($tKinmu !== null && count($colsKinmu) > 0) {
+        try {
+            $st = $pdo->query('SELECT * FROM ' . $qKinmu);
+            $n  = 0;
+            while (($r = $st->fetch(PDO::FETCH_ASSOC)) !== false && $n < 20) {
+                $row = array();
+                foreach ($r as $k => $v) {
+                    // 勤務表など長い列は省く
+                    $s = trim((string)$v);
+                    if (strlen($s) > 40) continue;
+                    $row[$k] = $s;
+                }
+                $kinmuRows[] = $row;
+                $n++;
+            }
+            $st->closeCursor();
+        } catch (Exception $e) {}
+    }
+
     echo json_encode(array(
         'ok'          => true,
         'mode'        => 'probe',
@@ -541,15 +650,24 @@ if ($probe) {
         'database'    => $DB_NAME,
         'foundIn'     => $foundDb,
         'tableCount'  => count($catalog),
-        'tables'      => array_slice($tableList, 0, 200),
+        // 表が全部見つかっているときは一覧を出さない（数千件あることがある）
+        'tables'      => ($tKinm && $tKinmu && $tKojin) ? array() : array_slice($tableList, 0, 200),
         'dbSearch'    => $dbSearch,
         'notes'       => $notes,
         'user'        => $DB_USER,
         'JoyKinmData' => probeColumns($pdo, $qKinm),
         'JoyKinmu'    => probeColumns($pdo, $qKinmu),
         'JoyKojin'    => probeColumns($pdo, $qKojin),
-        'hint'        => 'JoyKinmu の列名を確認し $KINMU_CD_COL / $KINMU_NAME_COL を合わせてください。'
-                       . ' また JoyKojin の Code（6桁）と給食システムの職員ID（8桁）の対応を確認してください。',
+        'usedColumns' => array(
+            '勤務データ'     => '年月=' . $cYm . ' / 部署=' . $cBusyo . ' / 個人CD=' . $cKojin
+                             . ' / 区分=' . $cKbn . ' / 勤務表=' . $cTbl,
+            '勤務種類マスタ' => '勤務CD=' . $cKinmuCd . ' / 表示名=' . $cKinmuName,
+            '個人マスタ'     => '個人CD=' . $cKojinCd . ' / 氏名=' . $cKojinName
+                             . ' / 在籍状態=' . $cKojinState,
+        ),
+        'kinmuRows'   => $kinmuRows,
+        'hint'        => '「使う列」が正しいかご確認ください。勤務種類マスタの表示名の列が違う場合は'
+                       . ' sync_shifts.php の $KINMU_NAME_COL に列名を設定してください。',
     ), JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -569,41 +687,53 @@ if ($YYMM_FORMAT === 'ym' || $YYMM_FORMAT === 'auto') {
     $ymCandidates[] = sprintf('%02d%02d', $year % 100, $month);  // 2609
 }
 
+// 必要な列が見つからない場合は、何が足りないかを具体的に伝えて止める
+$miss = missingCols(array(
+    '年月(YYMM)' => $cYm, '個人CD(Kojin)' => $cKojin, '区分(Kbn)' => $cKbn, '勤務表(KinmuTbl)' => $cTbl,
+));
+if (count($miss) > 0) {
+    fail('勤務データの表で必要な列が見つかりませんでした: ' . implode(' / ', $miss),
+         array('table' => $qKinm, 'columns' => $colsKinm,
+               'hints' => array('この表の列: ' . implode(', ', $colsKinm),
+                                '接続テストで「使う列」をご確認ください。')));
+}
+
 try {
     // --- 勤務データを取得（Kojin='000000' は部署行なので除外）---
+    // 列名は実物の綴りを使う（照合順序によっては大文字小文字が区別されるため）
     $rows = array();
     $usedYm = '';
     foreach ($ymCandidates as $ym) {
-        $sql = 'SELECT ' . qid($usedDriver,'YYMM') . ' AS "YYMM", '
-             . qid($usedDriver,'Busyo')    . ' AS "Busyo", '
-             . qid($usedDriver,'Kojin')    . ' AS "Kojin", '
-             . qid($usedDriver,'Kbn')      . ' AS "Kbn", '
-             . qid($usedDriver,'KinmuTbl') . ' AS "KinmuTbl"'
+        $sql = 'SELECT ' . qid($usedDriver,$cYm)   . ' AS "YYMM", '
+             . ($cBusyo !== '' ? qid($usedDriver,$cBusyo) . ' AS "Busyo", ' : "'' AS \"Busyo\", ")
+             . qid($usedDriver,$cKojin) . ' AS "Kojin", '
+             . qid($usedDriver,$cKbn)   . ' AS "Kbn", '
+             . qid($usedDriver,$cTbl)   . ' AS "KinmuTbl"'
              . ' FROM ' . $qKinm
-             . ' WHERE ' . qid($usedDriver,'YYMM')  . ' = :ym'
-             . '   AND ' . qid($usedDriver,'Kbn')   . ' = :kbn'
-             . '   AND ' . qid($usedDriver,'Kojin') . ' <> :zero';
+             . ' WHERE ' . qid($usedDriver,$cYm)   . ' = :ym'
+             . '   AND ' . qid($usedDriver,$cKbn)  . ' = :kbn'
+             . '   AND ' . qid($usedDriver,$cKojin). ' <> :zero';
         $params = array(':ym' => $ym, ':kbn' => $KBN, ':zero' => '000000');
-        if (count($BUSYO_FILTER) > 0) {
+        if (count($BUSYO_FILTER) > 0 && $cBusyo !== '') {
             $ph = array();
             foreach ($BUSYO_FILTER as $i => $b) { $ph[] = ':b'.$i; $params[':b'.$i] = $b; }
-            $sql .= ' AND ' . qid($usedDriver,'Busyo') . ' IN (' . implode(',', $ph) . ')';
+            $sql .= ' AND ' . qid($usedDriver,$cBusyo) . ' IN (' . implode(',', $ph) . ')';
         }
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        $rows = $stmt->fetchAll();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (count($rows) > 0) { $usedYm = $ym; break; }
     }
 
     // --- 勤務CD → 表示名 の対応表 ---
     $nameOf = array();
     $kinmuErr = '';
-    if ($USE_KINMU_MASTER) {
+    if ($USE_KINMU_MASTER && $cKinmuCd !== '' && $cKinmuName !== '') {
         try {
-            $ks = $pdo->query('SELECT ' . qid($usedDriver,$KINMU_CD_COL) . ' AS "cd", '
-                            . qid($usedDriver,$KINMU_NAME_COL) . ' AS "nm"'
+            $ks = $pdo->query('SELECT ' . qid($usedDriver,$cKinmuCd) . ' AS "cd", '
+                            . qid($usedDriver,$cKinmuName) . ' AS "nm"'
                             . ' FROM ' . $qKinmu);
-            foreach ($ks->fetchAll() as $k) {
+            foreach ($ks->fetchAll(PDO::FETCH_ASSOC) as $k) {
                 $cd = trim((string)$k['cd']);
                 $nm = trim((string)$k['nm']);
                 if ($cd !== '') $nameOf[$cd] = $nm;
@@ -613,10 +743,12 @@ try {
             $kinmuErr = $e->getMessage();
             $nameOf = array();
         }
+    } elseif ($USE_KINMU_MASTER) {
+        $kinmuErr = '勤務種類マスタの勤務CD・表示名の列を特定できませんでした（勤務CDのまま取り込みます）';
     }
 
     // --- 職員IDの対応づけに使う情報を読む ---
-    $kojin = loadKojin($pdo, $usedDriver, $qKojin, $KOJIN_CD_COL, $KOJIN_NAME_COL, $KOJIN_STATE_COL);
+    $kojin = loadKojin($pdo, $usedDriver, $qKojin, $cKojinCd, $cKojinName, $cKojinState);
     $staff = loadStaffMaster($STAFF_FILE);
     $manual = array();
     if (is_file($ID_MAP_FILE)) {
