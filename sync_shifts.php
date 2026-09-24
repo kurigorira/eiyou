@@ -239,19 +239,112 @@ function qid($driver, $name) {
     }
 }
 
+/* ==================== テーブルの自動探索 ====================
+ * SQL Server では、テーブルが dbo 以外のスキーマにあったり、別のデータベースに
+ * あったりすると「オブジェクト名 'JoyKinmData' が無効です」になる。
+ * 決め打ちせず、サーバーに実際にある表の一覧から探す。 */
+
+/** 接続中のデータベースの表の一覧を取得する
+ *  戻り値: array( array('schema'=>..,'name'=>..), ... ) */
+function loadTableCatalog($pdo, $driver = '', $dbName = '') {
+    $out = array();
+    try {
+        // システム用の表は除く（これが混ざると本来の表が埋もれる）
+        $sql = 'SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES'
+             . " WHERE TABLE_SCHEMA NOT IN ('information_schema','pg_catalog','sys','INFORMATION_SCHEMA')";
+        if ($driver === 'mysql' && $dbName !== '') {
+            // MySQLのINFORMATION_SCHEMAは全DBを返すので、対象DBに絞る
+            $sql .= ' AND TABLE_SCHEMA = ' . $pdo->quote($dbName);
+        }
+        foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            // 列名の大文字小文字はDBMSによって違うので両方見る
+            $sc = isset($r['TABLE_SCHEMA']) ? $r['TABLE_SCHEMA'] : (isset($r['table_schema']) ? $r['table_schema'] : '');
+            $nm = isset($r['TABLE_NAME'])   ? $r['TABLE_NAME']   : (isset($r['table_name'])   ? $r['table_name']   : '');
+            if ($nm === '') continue;
+            $out[] = array('schema' => (string)$sc, 'name' => (string)$nm);
+        }
+    } catch (Exception $e) {
+        // 一覧が引けない場合は探索なしで続行する
+    }
+    return $out;
+}
+
+/** SQL Server で、同じサーバー上の他のデータベースを一覧する */
+function listDatabases($pdo, $driver) {
+    $out = array();
+    try {
+        if ($driver === 'sqlsrv' || $driver === 'odbc') {
+            $sql = "SELECT name FROM sys.databases WHERE name NOT IN ('master','tempdb','model','msdb')"
+                 . " AND state = 0 ORDER BY name";
+        } elseif ($driver === 'mysql') {
+            $sql = "SHOW DATABASES";
+        } elseif ($driver === 'pgsql') {
+            $sql = "SELECT datname AS name FROM pg_database WHERE datistemplate = false ORDER BY 1";
+        } else {
+            return $out;
+        }
+        foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_NUM) as $r) {
+            $out[] = (string)$r[0];
+        }
+    } catch (Exception $e) {}
+    return $out;
+}
+
+/** 表の一覧から、探している名前に当たるものを見つける
+ *  ① 完全一致（大文字小文字は無視） ② 部分一致
+ *  戻り値: array('schema'=>..,'name'=>..) または null */
+function findTable($catalog, $wanted) {
+    $w = strtolower(trim($wanted));
+    if ($w === '') return null;
+    foreach ($catalog as $t) {
+        if (strtolower($t['name']) === $w) return $t;
+    }
+    // dbo を優先しつつ部分一致で探す（例: JoyKinmData → TJoyKinmData）
+    $hit = null;
+    foreach ($catalog as $t) {
+        if (strpos(strtolower($t['name']), $w) === false) continue;
+        if ($hit === null || strtolower($t['schema']) === 'dbo') $hit = $t;
+    }
+    return $hit;
+}
+
+/** スキーマ付きのテーブル名を組み立てる（例: [dbo].[JoyKinmData]） */
+function qtable($driver, $t, $fallbackName) {
+    if ($t === null) return qid($driver, $fallbackName);
+    if ($t['schema'] === '') return qid($driver, $t['name']);
+    return qid($driver, $t['schema']) . '.' . qid($driver, $t['name']);
+}
+
+/** 表が見つからないときの説明文を作る */
+function tableNotFoundNote($wanted, $catalog, $dbName) {
+    if (count($catalog) === 0) {
+        return 'テーブル ' . $wanted . ' が見つからず、表の一覧も取得できませんでした。'
+             . 'アカウントに参照権限があるかご確認ください。';
+    }
+    $names = array();
+    foreach ($catalog as $t) {
+        $names[] = ($t['schema'] !== '' && strtolower($t['schema']) !== 'dbo')
+                 ? $t['schema'] . '.' . $t['name'] : $t['name'];
+        if (count($names) >= 12) break;
+    }
+    return 'データベース ' . $dbName . ' に ' . $wanted . ' がありません。'
+         . '（このDBにある表: ' . implode(', ', $names)
+         . (count($catalog) > 12 ? ' ほか' . (count($catalog) - 12) . '個' : '') . '）';
+}
+
 /** 氏名を比較用に正規化する（全角・半角スペースを除去） */
 function normName($s) {
     $s = trim((string)$s);
     return str_replace(array(' ', '　', "\t"), '', $s);
 }
 
-/** JoyKojin から 個人CD => [氏名, 在籍状態] を読む */
+/** JoyKojin から 個人CD => [氏名, 在籍状態] を読む。$table は修飾済みの表名 */
 function loadKojin($pdo, $driver, $table, $cdCol, $nameCol, $stateCol) {
     $out = array();
     try {
         $sql = 'SELECT ' . qid($driver,$cdCol) . ' AS "cd", ' . qid($driver,$nameCol) . ' AS "nm"';
         if ($stateCol) $sql .= ', ' . qid($driver,$stateCol) . ' AS "st"';
-        $sql .= ' FROM ' . qid($driver,$table);
+        $sql .= ' FROM ' . $table;
         foreach ($pdo->query($sql)->fetchAll() as $r) {
             $cd = trim((string)$r['cd']);
             if ($cd === '') continue;
@@ -319,16 +412,17 @@ function mapKojinToStaffId($cd, $mode, $manual, $kojin, $staff, &$how) {
     return '';
 }
 
-/** テーブルの列名を1行だけ読んで調べる */
-function probeColumns($pdo, $driver, $table) {
+/** テーブルの列名を1行だけ読んで調べる。$qualified は [dbo].[JoyKinmData] 形式 */
+function probeColumns($pdo, $qualified) {
     try {
-        $st = $pdo->query('SELECT * FROM ' . qid($driver, $table));
-        $row = $st->fetch();
+        $st = $pdo->query('SELECT * FROM ' . $qualified);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
         $st->closeCursor();
-        if ($row === false) return array('columns' => array(), 'note' => 'テーブルは存在しますが行がありません');
-        return array('columns' => array_keys($row), 'sample' => $row);
+        if ($row === false) return array('table' => $qualified, 'columns' => array(),
+                                         'note' => 'テーブルは存在しますが行がありません');
+        return array('table' => $qualified, 'columns' => array_keys($row), 'sample' => $row);
     } catch (Exception $e) {
-        return array('error' => $e->getMessage());
+        return array('table' => $qualified, 'error' => $e->getMessage());
     }
 }
 
@@ -366,18 +460,94 @@ if ($pdo === null) {
          ));
 }
 
+/* ---------- 接続中のDBにある表を調べ、目的の表を探す ---------- */
+$catalog  = loadTableCatalog($pdo, $usedDriver, $DB_NAME);
+$foundDb  = $DB_NAME;
+$tKinm    = findTable($catalog, $KINMDATA_TABLE);
+$tKinmu   = findTable($catalog, $KINMU_TABLE);
+$tKojin   = findTable($catalog, $KOJIN_TABLE);
+$dbSearch = array();   // 他DBを探した記録
+
+// このDBに無い場合、同じサーバーの他のデータベースを探す
+if ($tKinm === null) {
+    foreach (listDatabases($pdo, $usedDriver) as $db) {
+        if ($db === $DB_NAME) continue;
+        try {
+            if ($usedDriver === 'sqlsrv' || $usedDriver === 'odbc') {
+                $sql = 'SELECT TABLE_SCHEMA, TABLE_NAME FROM ' . qid($usedDriver, $db)
+                     . '.INFORMATION_SCHEMA.TABLES'
+                     . " WHERE TABLE_SCHEMA NOT IN ('sys','INFORMATION_SCHEMA')";
+            } elseif ($usedDriver === 'mysql') {
+                $sql = 'SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES'
+                     . ' WHERE TABLE_SCHEMA = ' . $pdo->quote($db);
+            } else {
+                continue;   // PostgreSQL は接続を張り直さないと他DBを見られない
+            }
+            $cat2 = array();
+            foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $sc = isset($r['TABLE_SCHEMA']) ? $r['TABLE_SCHEMA'] : '';
+                $nm = isset($r['TABLE_NAME'])   ? $r['TABLE_NAME']   : '';
+                if ($nm !== '') $cat2[] = array('schema' => (string)$sc, 'name' => (string)$nm);
+            }
+            $hit = findTable($cat2, $KINMDATA_TABLE);
+            $dbSearch[] = $db . ': ' . (count($cat2) . '個の表' . ($hit ? ' → 見つかりました' : ''));
+            if ($hit !== null) {
+                // 見つかったDBに切り替える（表名を DB名.スキーマ.表名 で修飾する）
+                $foundDb = $db;
+                $catalog = $cat2;
+                $tKinm   = $hit;
+                $tKinmu  = findTable($cat2, $KINMU_TABLE);
+                $tKojin  = findTable($cat2, $KOJIN_TABLE);
+                break;
+            }
+        } catch (Exception $e) {
+            $dbSearch[] = $db . ': 参照できません';
+        }
+    }
+}
+
+/** 見つかった表を、必要ならDB名付きで修飾して返す */
+function qfound($driver, $t, $fallback, $foundDb, $curDb) {
+    $base = qtable($driver, $t, $fallback);
+    if ($t !== null && $foundDb !== $curDb) return qid($driver, $foundDb) . '.' . $base;
+    return $base;
+}
+$qKinm  = qfound($usedDriver, $tKinm,  $KINMDATA_TABLE, $foundDb, $DB_NAME);
+$qKinmu = qfound($usedDriver, $tKinmu, $KINMU_TABLE,    $foundDb, $DB_NAME);
+$qKojin = qfound($usedDriver, $tKojin, $KOJIN_TABLE,    $foundDb, $DB_NAME);
+
 /* ---------- 調査モード: 接続確認とテーブルの列名を表示 ---------- */
 if ($probe) {
+    $tableList = array();
+    foreach ($catalog as $t) {
+        $tableList[] = ($t['schema'] !== '' ? $t['schema'] . '.' : '') . $t['name'];
+    }
+    sort($tableList);
+    $notes = array();
+    if ($tKinm === null)  $notes[] = tableNotFoundNote($KINMDATA_TABLE, $catalog, $DB_NAME);
+    if ($foundDb !== $DB_NAME) {
+        $notes[] = '目的の表は ' . $DB_NAME . ' ではなく ' . $foundDb . ' にありました。'
+                 . 'sync_shifts.php の $DB_NAME を ' . $foundDb . ' に変更することをおすすめします。';
+    }
+    if (strtolower($DB_USER) === 'sa') {
+        $notes[] = '【ご注意】sa は SQL Server の最上位管理者アカウントです。'
+                 . '給食システムからは参照専用（SELECTのみ）のアカウントに変更してください。';
+    }
     echo json_encode(array(
         'ok'          => true,
         'mode'        => 'probe',
         'driver'      => $usedDriver,
         'dsn'         => $usedDsn,
         'database'    => $DB_NAME,
+        'foundIn'     => $foundDb,
+        'tableCount'  => count($catalog),
+        'tables'      => array_slice($tableList, 0, 200),
+        'dbSearch'    => $dbSearch,
+        'notes'       => $notes,
         'user'        => $DB_USER,
-        'JoyKinmData' => probeColumns($pdo, $usedDriver, $KINMDATA_TABLE),
-        'JoyKinmu'    => probeColumns($pdo, $usedDriver, $KINMU_TABLE),
-        'JoyKojin'    => probeColumns($pdo, $usedDriver, $KOJIN_TABLE),
+        'JoyKinmData' => probeColumns($pdo, $qKinm),
+        'JoyKinmu'    => probeColumns($pdo, $qKinmu),
+        'JoyKojin'    => probeColumns($pdo, $qKojin),
         'hint'        => 'JoyKinmu の列名を確認し $KINMU_CD_COL / $KINMU_NAME_COL を合わせてください。'
                        . ' また JoyKojin の Code（6桁）と給食システムの職員ID（8桁）の対応を確認してください。',
     ), JSON_UNESCAPED_UNICODE);
@@ -409,7 +579,7 @@ try {
              . qid($usedDriver,'Kojin')    . ' AS "Kojin", '
              . qid($usedDriver,'Kbn')      . ' AS "Kbn", '
              . qid($usedDriver,'KinmuTbl') . ' AS "KinmuTbl"'
-             . ' FROM ' . qid($usedDriver, $KINMDATA_TABLE)
+             . ' FROM ' . $qKinm
              . ' WHERE ' . qid($usedDriver,'YYMM')  . ' = :ym'
              . '   AND ' . qid($usedDriver,'Kbn')   . ' = :kbn'
              . '   AND ' . qid($usedDriver,'Kojin') . ' <> :zero';
@@ -432,7 +602,7 @@ try {
         try {
             $ks = $pdo->query('SELECT ' . qid($usedDriver,$KINMU_CD_COL) . ' AS "cd", '
                             . qid($usedDriver,$KINMU_NAME_COL) . ' AS "nm"'
-                            . ' FROM ' . qid($usedDriver,$KINMU_TABLE));
+                            . ' FROM ' . $qKinmu);
             foreach ($ks->fetchAll() as $k) {
                 $cd = trim((string)$k['cd']);
                 $nm = trim((string)$k['nm']);
@@ -446,7 +616,7 @@ try {
     }
 
     // --- 職員IDの対応づけに使う情報を読む ---
-    $kojin = loadKojin($pdo, $usedDriver, $KOJIN_TABLE, $KOJIN_CD_COL, $KOJIN_NAME_COL, $KOJIN_STATE_COL);
+    $kojin = loadKojin($pdo, $usedDriver, $qKojin, $KOJIN_CD_COL, $KOJIN_NAME_COL, $KOJIN_STATE_COL);
     $staff = loadStaffMaster($STAFF_FILE);
     $manual = array();
     if (is_file($ID_MAP_FILE)) {
@@ -455,7 +625,9 @@ try {
     }
 } catch (Exception $e) {
     fail('勤務データの取得に失敗しました: ' . $e->getMessage(),
-         array('driver' => $usedDriver, 'table' => $KINMDATA_TABLE));
+         array('driver' => $usedDriver, 'table' => $qKinm,
+               'hints' => array($tKinm === null ? tableNotFoundNote($KINMDATA_TABLE, $catalog, $DB_NAME)
+                                                : '表は見つかっています。列名（YYMM / Busyo / Kojin / Kbn / KinmuTbl）をご確認ください。')));
 }
 
 if (count($rows) === 0) {

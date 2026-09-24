@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-24a';
+var APP_VERSION = '2026-09-24b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1539,16 +1539,25 @@ function renderProbeResult(res, isError) {
     add('結果', '接続できました');
     add('DBの種類', res.driver);
     add('接続先', res.dsn);
-    add('データベース', res.database);
+    add('データベース', res.database
+        + (res.foundIn && res.foundIn !== res.database ? '（表は ' + res.foundIn + ' にありました）' : ''));
     add('アカウント', res.user);
     var tbl = function(name) {
       var t = res[name];
       if (!t) return;
-      if (t.error) add(name, '読めません: ' + t.error);
-      else if (t.columns && t.columns.length) add(name + ' の列名', t.columns.join(', '));
-      else add(name, t.note || '列が取得できませんでした');
+      var where = t.table ? '（' + t.table + '）' : '';
+      if (t.error) add(name, '読めません' + where + ': ' + t.error);
+      else if (t.columns && t.columns.length) add(name + ' の列名' + where, t.columns.join(', '));
+      else add(name, (t.note || '列が取得できませんでした') + where);
     };
     tbl('JoyKinmData'); tbl('JoyKinmu'); tbl('JoyKojin');
+    // 目的の表が見つからない場合に備えて、このDBにある表を見せる
+    if (res.tables && res.tables.length) {
+      add('このDBにある表（' + (res.tableCount || res.tables.length) + '個）', res.tables.join(', '));
+    }
+    if (res.dbSearch && res.dbSearch.length) {
+      add('他のDBの探索', res.dbSearch.join('\n'));
+    }
   }
 
   var html = '<table class="data-table" style="max-width:900px"><tbody>';
@@ -1559,6 +1568,14 @@ function renderProbeResult(res, isError) {
           + esc(String(rows[i][1])) + '</td></tr>';
   }
   html += '</tbody></table>';
+
+  // 接続はできたが表が見つからない等のお知らせ
+  if (!isError && res.notes && res.notes.length) {
+    html += '<div class="notice notice-warning" style="margin-top:10px;border-color:#dc3545;background:#fdecea">'
+          + '<strong>確認が必要な点</strong><ul style="margin:6px 0 0 18px;line-height:1.8">';
+    for (var i=0; i<res.notes.length; i++) html += '<li>' + esc(res.notes[i]) + '</li>';
+    html += '</ul></div>';
+  }
 
   // サーバー側が原因を特定できた場合は、それを最優先で見せる
   var hints = (res.detail && res.detail.hints) ? res.detail.hints : [];
