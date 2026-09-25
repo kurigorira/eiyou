@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-25a';
+var APP_VERSION = '2026-09-25b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1793,6 +1793,51 @@ function exportHoikuFormExcel() {
   showToast(y+'年'+m+'月の食事注文表を出力しました');
 }
 
+// 各シートの一番下に、保護者職員の勤務区分を差し込む。
+// 日付の列は上の表と揃えるため、先頭2列（氏名・部署）にしている。
+// kids に該当する子供の保護者だけを対象にする（シートごとの区分に合わせる）。
+function appendShiftBlock(sheet, y, m, days, kids, label) {
+  var idSet = {}, ids = [];
+  for (var i=0; i<kids.length; i++) if (kids[i].staffId) idSet[kids[i].staffId] = true;
+  for (var sid in idSet) ids.push(sid);
+  // 氏名順に並べる（氏名が無い場合はIDで）
+  ids.sort(function(a, b) {
+    var sa = getStaffById(a), sb = getStaffById(b);
+    var na = sa && sa.name ? sa.name : a, nb = sb && sb.name ? sb.name : b;
+    return na < nb ? -1 : (na > nb ? 1 : 0);
+  });
+
+  sheet.rows.push([]);
+  var tr = sheet.rows.length + 1;
+  var title = [XC(y+'年'+m+'月　保護者の勤務区分' + (label ? '（'+label+'）' : ''), 3)];
+  for (var c=1; c<2+days; c++) title.push(XC('',3));
+  sheet.rows.push(title);
+  sheet.merges.push('A'+tr+':'+xlsxColLetter(1+days)+tr);
+
+  var hdr = [XC('氏名',1), XC('部署',1)];
+  for (var d=1; d<=days; d++) hdr.push(XC(d, dayFillStyle(y,m,d,true)));
+  sheet.rows.push(hdr);
+
+  if (ids.length === 0) {
+    sheet.rows.push([XC('対象の保護者がいません', 4)]);
+    return;
+  }
+  var anyShift = false;
+  for (var i=0; i<ids.length; i++) {
+    var st = getStaffById(ids[i]);
+    var row = [XC(st && st.name ? st.name : ids[i], 4), XC(staffDept(ids[i]), 4)];
+    for (var d=1; d<=days; d++) {
+      var v = getShift(ids[i], y, m, d);
+      if (v) anyShift = true;
+      row.push(XC(v, dayFillStyle(y,m,d,false)));
+    }
+    sheet.rows.push(row);
+  }
+  if (!anyShift) {
+    sheet.rows.push([XC(y+'年'+m+'月の勤務区分は取り込まれていません', 4)]);
+  }
+}
+
 // 日付列の見出し（日＋曜日）を作る
 function formDayHeader(sheet, y, m, days, startCol) {
   var row1 = [], row2 = [];
@@ -1852,6 +1897,7 @@ function buildAttendanceSheet(y, m) {
     }
     if (kids.length > 1) sheet.merges.push('A'+blockStart+':A'+(sheet.rows.length));
   }
+  appendShiftBlock(sheet, y, m, days, children, '');
   return sheet;
 }
 
@@ -1906,6 +1952,7 @@ function buildOrderFormSheet(y, m, cat) {
   }
   if (kids.length === 0) {
     sheet.rows.push([XC('該当する子供が登録されていません', 4)]);
+    appendShiftBlock(sheet, y, m, days, kids, cat.label);
     return sheet;
   }
 
@@ -1921,6 +1968,7 @@ function buildOrderFormSheet(y, m, cat) {
     sheet.rows.push(row);
   }
   sheet.merges.push('A'+sumStart+':A'+(sheet.rows.length));
+  appendShiftBlock(sheet, y, m, days, kids, cat.label);
   return sheet;
 }
 
