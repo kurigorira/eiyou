@@ -333,3 +333,14 @@ input[type="text"], input[type="date"], select {
   .meal-cards { grid-template-columns: 1fr; }
   .control-row { flex-direction: column; align-items: stretch; }
 }
+
+/* 保育士の勤務入力のマス目 */
+.hss-cell {
+  width: 46px;
+  font-size: 0.75rem;
+  padding: 2px 3px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  text-align: center;
+}
+.hss-cell:focus { outline: 2px solid var(--primary); outline-offset: -1px; }

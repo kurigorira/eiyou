@@ -10,7 +10,8 @@ if (!is_dir($dataDir)) {
 $allowed = array(
     'staff', 'orders', 'holidays', 'history', 'children', 'config',
     'confirmed', 'hoiku_orders', 'hoiku_history', 'hoiku_confirmed', 'kensa',
-    'prices', 'shifts', 'shiftdefs', 'hoiku_config'
+    'prices', 'shifts', 'shiftdefs', 'hoiku_config',
+    'hoiku_staff', 'hoiku_shifts'
 );
 
 $defaults = array(
@@ -18,7 +19,8 @@ $defaults = array(
     'children'=>'[]', 'config'=>'{}', 'confirmed'=>'{}',
     'hoiku_orders'=>'{}', 'hoiku_history'=>'[]', 'hoiku_confirmed'=>'{}',
     'kensa'=>'{}', 'prices'=>'{}', 'shifts'=>'{}',
-    'shiftdefs'=>'[]', 'hoiku_config'=>'{}'
+    'shiftdefs'=>'[]', 'hoiku_config'=>'{}',
+    'hoiku_staff'=>'[]', 'hoiku_shifts'=>'{}'
 );
 
 /**

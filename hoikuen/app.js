@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-25b';
+var APP_VERSION = '2026-09-25c';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -20,6 +20,8 @@ var prices = {};
 var shifts = {};
 var shiftDefs = [];      // 勤務区分マスタ [{name, meals:{b,s1,l,s2,d}}]
 var hoikuConfig = {};    // 保育園専用の設定（管理者パスワード等）
+var hoikuStaff = [];     // 保育園で働く職員（保育士）[{id, name, role}]
+var hoikuShifts = {};    // 保育士の勤務 {年月: {保育士ID: {日: '早番'}}}
 var hAdminMode = false;
 var toastTimer = null;
 var orderLocked = true;
@@ -46,6 +48,8 @@ function loadData() {
     shifts = d.shifts || {};
     shiftDefs = d.shiftdefs || [];
     hoikuConfig = d.hoiku_config || {};
+    hoikuStaff = d.hoiku_staff || [];
+    hoikuShifts = d.hoiku_shifts || {};
   });
 }
 
@@ -348,6 +352,314 @@ function getShiftDef(value) {
   return null;
 }
 
+// ==================== 保育士（保育園で働く職員） ====================
+// よく使う勤務の候補。入力欄の候補として出すだけで、これ以外も自由に入力できる。
+var DEFAULT_HOIKU_SHIFT_VALUES = ['早番', '日勤', '遅番', '夜勤', '休', '有'];
+
+function getHoikuStaffById(id) {
+  for (var i=0; i<hoikuStaff.length; i++) if (hoikuStaff[i].id === id) return hoikuStaff[i];
+  return null;
+}
+// 並び順 → 氏名の順に整列した保育士の一覧
+function getHoikuStaffSorted() {
+  return hoikuStaff.slice().sort(function(a, b) {
+    var oa = (a.order == null) ? 9999 : Number(a.order);
+    var ob = (b.order == null) ? 9999 : Number(b.order);
+    if (oa !== ob) return oa - ob;
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  });
+}
+function saveHoikuStaff() { apiSave('hoiku_staff', hoikuStaff); }
+
+function getHoikuShift(staffId, y, m, d) {
+  var ym = y + '-' + pad(m);
+  if (!hoikuShifts[ym] || !hoikuShifts[ym][staffId]) return '';
+  return hoikuShifts[ym][staffId][d] || '';
+}
+function setHoikuShift(staffId, y, m, d, value) {
+  var ym = y + '-' + pad(m);
+  // PHPが空のオブジェクトを [] として書き出すため、配列なら作り直す
+  if (!hoikuShifts[ym] || Object.prototype.toString.call(hoikuShifts[ym]) === '[object Array]') hoikuShifts[ym] = {};
+  if (!hoikuShifts[ym][staffId] ||
+      Object.prototype.toString.call(hoikuShifts[ym][staffId]) === '[object Array]') {
+    hoikuShifts[ym][staffId] = {};
+  }
+  var v = (value == null) ? '' : String(value).trim();
+  if (v === '') delete hoikuShifts[ym][staffId][d];
+  else hoikuShifts[ym][staffId][String(d)] = v;
+}
+function saveHoikuShiftDay(staffId, y, m, d, value) {
+  var ym = y + '-' + pad(m);
+  var partial = {};
+  partial[ym] = {};
+  partial[ym][staffId] = {};
+  partial[ym][staffId][String(d)] = (value === '') ? null : value;
+  apiMerge('hoiku_shifts', partial, 3);
+}
+function saveHoikuShiftMonth(staffId, y, m) {
+  var ym = y + '-' + pad(m);
+  var cur = (hoikuShifts[ym] && hoikuShifts[ym][staffId]) ? hoikuShifts[ym][staffId] : {};
+  var hasAny = false;
+  for (var k in cur) { hasAny = true; break; }
+  if (!hasAny && hoikuShifts[ym]) delete hoikuShifts[ym][staffId];
+  var partial = {};
+  partial[ym] = {};
+  partial[ym][staffId] = hasAny ? cur : null;
+  apiMerge('hoiku_shifts', partial, 2);
+}
+
+// ==================== 保育士管理タブ ====================
+function initHoikuStaffTab() {
+  var ySel = document.getElementById('hss-year');
+  var mSel = document.getElementById('hss-month');
+  if (ySel && ySel.options.length === 0) {
+    var now = new Date();
+    for (var y=now.getFullYear()-1; y<=now.getFullYear()+2; y++) {
+      var o = document.createElement('option'); o.value=y; o.textContent=y; ySel.appendChild(o);
+    }
+    for (var m=1; m<=12; m++) {
+      var o2 = document.createElement('option'); o2.value=m; o2.textContent=m; mSel.appendChild(o2);
+    }
+    ySel.value = now.getFullYear(); mSel.value = now.getMonth()+1;
+  }
+  var get = function(k) { return fetch(API_URL + '?key=' + k + '&t=' + Date.now()).then(function(r){return r.json();}); };
+  Promise.all([get('hoiku_staff'), get('hoiku_shifts')]).then(function(res) {
+    hoikuStaff  = res[0] || [];
+    hoikuShifts = res[1] || {};
+  }).catch(function(){}).then(function() {
+    renderHoikuStaffList();
+    renderHoikuShiftValues();
+    renderHoikuShiftGrid();
+  });
+}
+
+function renderHoikuStaffList() {
+  var tb = document.getElementById('hstaff-list');
+  if (!tb) return;
+  var list = getHoikuStaffSorted();
+  if (list.length === 0) {
+    tb.innerHTML = '<tr><td colspan="4" class="placeholder-msg">保育士が登録されていません</td></tr>';
+    return;
+  }
+  var html = '';
+  for (var i=0; i<list.length; i++) {
+    var s = list[i];
+    html += '<tr><td style="text-align:left">'+esc(s.name)+'</td>'
+         +  '<td style="text-align:left">'+esc(s.role||'')+'</td>'
+         +  '<td><input type="number" class="hs-order" data-id="'+esc(s.id)+'" value="'+(s.order==null?'':s.order)+'"'
+         +  ' style="width:60px" title="小さい順に並びます"></td>'
+         +  '<td><button class="btn-sm hs-del" data-id="'+esc(s.id)+'">削除</button></td></tr>';
+  }
+  tb.innerHTML = html;
+  var dels = tb.querySelectorAll('button.hs-del');
+  for (var i=0; i<dels.length; i++) {
+    dels[i].addEventListener('click', function() { deleteHoikuStaff(this.getAttribute('data-id')); });
+  }
+  var ords = tb.querySelectorAll('input.hs-order');
+  for (var i=0; i<ords.length; i++) {
+    ords[i].addEventListener('change', function() {
+      var st = getHoikuStaffById(this.getAttribute('data-id'));
+      if (!st) return;
+      var v = this.value === '' ? null : parseInt(this.value, 10);
+      st.order = (v === null || isNaN(v)) ? null : v;
+      saveHoikuStaff();
+      renderHoikuStaffList();
+      renderHoikuShiftGrid();
+      showToast('並び順を変更しました');
+    });
+  }
+}
+
+function submitHoikuStaff(e) {
+  e.preventDefault();
+  var nameEl = document.getElementById('hs-name');
+  var roleEl = document.getElementById('hs-role');
+  var name = (nameEl.value || '').trim();
+  if (!name) { showToast('氏名を入力してください'); return; }
+  for (var i=0; i<hoikuStaff.length; i++) {
+    if (hoikuStaff[i].name === name) {
+      if (!confirm('同じ氏名の保育士がすでに登録されています。追加しますか？')) return;
+      break;
+    }
+  }
+  hoikuStaff.push({
+    id: 'hs' + Date.now() + Math.floor(Math.random()*1000),
+    name: name,
+    role: (roleEl.value || '').trim(),
+    order: hoikuStaff.length + 1
+  });
+  saveHoikuStaff();
+  nameEl.value = ''; roleEl.value = '';
+  renderHoikuStaffList();
+  renderHoikuShiftGrid();
+  showToast(name + ' を追加しました');
+}
+
+function deleteHoikuStaff(id) {
+  var st = getHoikuStaffById(id);
+  if (!st) return;
+  if (!confirm(st.name + ' を削除しますか？\n\nこの保育士の勤務もすべて消えます。')) return;
+  var next = [];
+  for (var i=0; i<hoikuStaff.length; i++) if (hoikuStaff[i].id !== id) next.push(hoikuStaff[i]);
+  hoikuStaff = next;
+  saveHoikuStaff();
+  // 勤務も消す
+  for (var ym in hoikuShifts) {
+    if (hoikuShifts[ym] && hoikuShifts[ym][id]) {
+      delete hoikuShifts[ym][id];
+      var partial = {}; partial[ym] = {}; partial[ym][id] = null;
+      apiMerge('hoiku_shifts', partial, 2);
+    }
+  }
+  renderHoikuStaffList();
+  renderHoikuShiftGrid();
+  showToast(st.name + ' を削除しました');
+}
+
+// 入力候補（既定の候補＋すでに使われている値）
+function renderHoikuShiftValues() {
+  var dl = document.getElementById('hss-values');
+  if (!dl) return;
+  var seen = {}, vals = [];
+  for (var i=0; i<DEFAULT_HOIKU_SHIFT_VALUES.length; i++) {
+    var v = DEFAULT_HOIKU_SHIFT_VALUES[i];
+    if (!seen[v]) { seen[v] = true; vals.push(v); }
+  }
+  for (var ym in hoikuShifts) {
+    for (var sid in hoikuShifts[ym]) {
+      for (var d in hoikuShifts[ym][sid]) {
+        var v2 = hoikuShifts[ym][sid][d];
+        if (v2 && !seen[v2]) { seen[v2] = true; vals.push(v2); }
+      }
+    }
+  }
+  var html = '';
+  for (var i=0; i<vals.length; i++) html += '<option value="' + esc(vals[i]) + '">';
+  dl.innerHTML = html;
+}
+
+function renderHoikuShiftGrid() {
+  var wrap = document.getElementById('hss-grid');
+  if (!wrap) return;
+  var list = getHoikuStaffSorted();
+  if (list.length === 0) {
+    wrap.innerHTML = '<p class="placeholder-msg">先に上で保育士を登録してください</p>';
+    return;
+  }
+  var y = parseInt(document.getElementById('hss-year').value);
+  var m = parseInt(document.getElementById('hss-month').value);
+  var days = daysInMonth(y, m);
+  var html = '<table class="rpt-table" style="min-width:900px"><thead><tr>'
+           + '<th style="min-width:110px">氏名</th><th style="min-width:80px">職種</th>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y, m, d);
+    var bg = getHolidayName(y+'-'+pad(m)+'-'+pad(d)) ? 'background:#fff8e1;'
+           : (dow===0 ? 'background:#fce4ec;' : (dow===6 ? 'background:#e8eaf6;' : ''));
+    html += '<th style="'+bg+'">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dow]+'</span></th>';
+  }
+  html += '</tr></thead><tbody>';
+  for (var i=0; i<list.length; i++) {
+    var s = list[i];
+    html += '<tr><td style="text-align:left;white-space:nowrap">'+esc(s.name)+'</td>'
+         +  '<td style="text-align:left;font-size:0.75rem">'+esc(s.role||'')+'</td>';
+    for (var d=1; d<=days; d++) {
+      var v = getHoikuShift(s.id, y, m, d);
+      html += '<td style="padding:1px"><input type="text" class="hss-cell" list="hss-values"'
+           +  ' data-id="'+esc(s.id)+'" data-d="'+d+'" value="'+esc(v)+'"></td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  var cells = wrap.querySelectorAll('input.hss-cell');
+  for (var i=0; i<cells.length; i++) {
+    cells[i].addEventListener('change', onHoikuShiftCellChange);
+  }
+}
+
+function onHoikuShiftCellChange() {
+  var y = parseInt(document.getElementById('hss-year').value);
+  var m = parseInt(document.getElementById('hss-month').value);
+  var sid = this.getAttribute('data-id');
+  var d = parseInt(this.getAttribute('data-d'), 10);
+  var v = (this.value || '').trim();
+  this.value = v;
+  setHoikuShift(sid, y, m, d, v);
+  saveHoikuShiftDay(sid, y, m, d, v);
+  renderHoikuShiftValues();
+  var st = getHoikuStaffById(sid);
+  setHoikuShiftStatus((st ? st.name + ' の ' : '') + d + '日を「' + (v || '未設定') + '」にしました');
+}
+
+function setHoikuShiftStatus(msg, isError) {
+  var el = document.getElementById('hss-status');
+  if (!el) return;
+  el.style.color = isError ? '#dc3545' : '';
+  el.textContent = msg;
+}
+
+function hoikuShiftBulkWeekday() {
+  var list = getHoikuStaffSorted();
+  if (list.length === 0) { setHoikuShiftStatus('先に保育士を登録してください', true); return; }
+  var v = (document.getElementById('hss-bulk-value').value || '').trim();
+  var y = parseInt(document.getElementById('hss-year').value);
+  var m = parseInt(document.getElementById('hss-month').value);
+  if (!confirm('全員の平日（土日祝を除く）を「' + (v || '未設定') + '」にします。よろしいですか？')) return;
+  var days = daysInMonth(y, m), n = 0;
+  for (var i=0; i<list.length; i++) {
+    for (var d=1; d<=days; d++) {
+      if (!isWorkday(y, m, d)) continue;
+      setHoikuShift(list[i].id, y, m, d, v);
+      if (i === 0) n++;
+    }
+    saveHoikuShiftMonth(list[i].id, y, m);
+  }
+  renderHoikuShiftValues();
+  renderHoikuShiftGrid();
+  setHoikuShiftStatus(list.length + '名の平日 ' + n + '日を「' + (v || '未設定') + '」にしました');
+  showToast('平日に反映しました');
+}
+
+function hoikuShiftCopyPrev() {
+  var list = getHoikuStaffSorted();
+  if (list.length === 0) { setHoikuShiftStatus('先に保育士を登録してください', true); return; }
+  var y = parseInt(document.getElementById('hss-year').value);
+  var m = parseInt(document.getElementById('hss-month').value);
+  var py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1;
+  var pym = py + '-' + pad(pm);
+  if (!hoikuShifts[pym]) { setHoikuShiftStatus(py + '年' + pm + '月の勤務がありません', true); return; }
+  if (!confirm(py + '年' + pm + '月の勤務を ' + y + '年' + m + '月にコピーします。\n現在の内容は上書きされます。')) return;
+  var days = daysInMonth(y, m), n = 0;
+  for (var i=0; i<list.length; i++) {
+    var src = hoikuShifts[pym][list[i].id] || {};
+    for (var d=1; d<=days; d++) {
+      var v = src[String(d)] || '';
+      setHoikuShift(list[i].id, y, m, d, v);
+      if (v) n++;
+    }
+    saveHoikuShiftMonth(list[i].id, y, m);
+  }
+  renderHoikuShiftGrid();
+  setHoikuShiftStatus(py + '年' + pm + '月から ' + n + '件コピーしました');
+  showToast('前月からコピーしました');
+}
+
+function hoikuShiftClear() {
+  var list = getHoikuStaffSorted();
+  if (list.length === 0) return;
+  var y = parseInt(document.getElementById('hss-year').value);
+  var m = parseInt(document.getElementById('hss-month').value);
+  if (!confirm(y + '年' + m + '月の勤務を全員分すべて消します。よろしいですか？')) return;
+  var days = daysInMonth(y, m);
+  for (var i=0; i<list.length; i++) {
+    for (var d=1; d<=days; d++) setHoikuShift(list[i].id, y, m, d, '');
+    saveHoikuShiftMonth(list[i].id, y, m);
+  }
+  renderHoikuShiftGrid();
+  setHoikuShiftStatus(y + '年' + m + '月の勤務を消しました');
+  showToast('当月の勤務を消しました');
+}
+
 // ==================== 保育園 管理者モード ====================
 function getHoikuPassword() { return hoikuConfig.password || ''; }
 
@@ -426,6 +738,7 @@ function showTab(name) {
   if (name==='history') renderHistory();
   if (name==='children') initChildrenTab();
   if (name==='master') initMasterTab();
+  if (name==='hstaff') initHoikuStaffTab();
   if (name==='hsettings') { renderHoikuPwStatus(); }
 }
 
@@ -434,7 +747,8 @@ function fetchAggregateData(fn) {
   var get = function(key) {
     return fetch(API_URL + '?key=' + key + '&t=' + Date.now()).then(function(r) { return r.json(); });
   };
-  Promise.all([get('hoiku_orders'), get('hoiku_confirmed'), get('prices'), get('shifts'), get('children'), get('shiftdefs')])
+  Promise.all([get('hoiku_orders'), get('hoiku_confirmed'), get('prices'), get('shifts'),
+               get('children'), get('shiftdefs'), get('hoiku_staff'), get('hoiku_shifts')])
     .then(function(res) {
       orders = res[0] || {};
       hoikuConfirmed = res[1] || {};
@@ -442,6 +756,8 @@ function fetchAggregateData(fn) {
       shifts = res[3] || {};
       children = res[4] || [];
       shiftDefs = res[5] || [];
+      hoikuStaff = res[6] || [];
+      hoikuShifts = res[7] || {};
       fn();
     }).catch(function() { fn(); });
 }
@@ -1793,48 +2109,39 @@ function exportHoikuFormExcel() {
   showToast(y+'年'+m+'月の食事注文表を出力しました');
 }
 
-// 各シートの一番下に、保護者職員の勤務区分を差し込む。
-// 日付の列は上の表と揃えるため、先頭2列（氏名・部署）にしている。
-// kids に該当する子供の保護者だけを対象にする（シートごとの区分に合わせる）。
-function appendShiftBlock(sheet, y, m, days, kids, label) {
-  var idSet = {}, ids = [];
-  for (var i=0; i<kids.length; i++) if (kids[i].staffId) idSet[kids[i].staffId] = true;
-  for (var sid in idSet) ids.push(sid);
-  // 氏名順に並べる（氏名が無い場合はIDで）
-  ids.sort(function(a, b) {
-    var sa = getStaffById(a), sb = getStaffById(b);
-    var na = sa && sa.name ? sa.name : a, nb = sb && sb.name ? sb.name : b;
-    return na < nb ? -1 : (na > nb ? 1 : 0);
-  });
+// 各シートの一番下に、保育園で働く職員（保育士）の勤務を差し込む。
+// 日付の列は上の表と揃えるため、先頭2列（氏名・職種）にしている。
+function appendShiftBlock(sheet, y, m, days) {
+  var list = getHoikuStaffSorted();
 
   sheet.rows.push([]);
   var tr = sheet.rows.length + 1;
-  var title = [XC(y+'年'+m+'月　保護者の勤務区分' + (label ? '（'+label+'）' : ''), 3)];
+  var title = [XC(y+'年'+m+'月　保育士の勤務', 3)];
   for (var c=1; c<2+days; c++) title.push(XC('',3));
   sheet.rows.push(title);
   sheet.merges.push('A'+tr+':'+xlsxColLetter(1+days)+tr);
 
-  var hdr = [XC('氏名',1), XC('部署',1)];
+  var hdr = [XC('氏名',1), XC('職種',1)];
   for (var d=1; d<=days; d++) hdr.push(XC(d, dayFillStyle(y,m,d,true)));
   sheet.rows.push(hdr);
 
-  if (ids.length === 0) {
-    sheet.rows.push([XC('対象の保護者がいません', 4)]);
+  if (list.length === 0) {
+    sheet.rows.push([XC('保育士が登録されていません（管理者モード →「保育士管理」で登録してください）', 4)]);
     return;
   }
   var anyShift = false;
-  for (var i=0; i<ids.length; i++) {
-    var st = getStaffById(ids[i]);
-    var row = [XC(st && st.name ? st.name : ids[i], 4), XC(staffDept(ids[i]), 4)];
+  for (var i=0; i<list.length; i++) {
+    var s = list[i];
+    var row = [XC(s.name, 4), XC(s.role || '', 4)];
     for (var d=1; d<=days; d++) {
-      var v = getShift(ids[i], y, m, d);
+      var v = getHoikuShift(s.id, y, m, d);
       if (v) anyShift = true;
       row.push(XC(v, dayFillStyle(y,m,d,false)));
     }
     sheet.rows.push(row);
   }
   if (!anyShift) {
-    sheet.rows.push([XC(y+'年'+m+'月の勤務区分は取り込まれていません', 4)]);
+    sheet.rows.push([XC(y+'年'+m+'月の保育士の勤務が入力されていません', 4)]);
   }
 }
 
@@ -1897,7 +2204,7 @@ function buildAttendanceSheet(y, m) {
     }
     if (kids.length > 1) sheet.merges.push('A'+blockStart+':A'+(sheet.rows.length));
   }
-  appendShiftBlock(sheet, y, m, days, children, '');
+  appendShiftBlock(sheet, y, m, days);
   return sheet;
 }
 
@@ -1952,7 +2259,7 @@ function buildOrderFormSheet(y, m, cat) {
   }
   if (kids.length === 0) {
     sheet.rows.push([XC('該当する子供が登録されていません', 4)]);
-    appendShiftBlock(sheet, y, m, days, kids, cat.label);
+    appendShiftBlock(sheet, y, m, days);
     return sheet;
   }
 
@@ -1968,7 +2275,7 @@ function buildOrderFormSheet(y, m, cat) {
     sheet.rows.push(row);
   }
   sheet.merges.push('A'+sumStart+':A'+(sheet.rows.length));
-  appendShiftBlock(sheet, y, m, days, kids, cat.label);
+  appendShiftBlock(sheet, y, m, days);
   return sheet;
 }
 
@@ -2264,6 +2571,46 @@ function buildShiftSection(y, m) {
   return html;
 }
 
+// 保育士（保育園で働く職員）の勤務。Excelの各シート末尾に出るものと同じ内容。
+function buildHoikuStaffShiftSection(y, m) {
+  var days = daysInMonth(y, m);
+  var list = getHoikuStaffSorted();
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 保育士の勤務</h3>';
+  if (list.length === 0) {
+    html += '<p class="help-text">保育士が登録されていません。'
+         +  '管理者モード →「保育士管理」タブで登録してください。</p></div>';
+    return html;
+  }
+  html += '<p class="help-text">食事注文表Excelの各シートの一番下に、この内容が出ます。</p>';
+  html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>氏名</th><th>職種</th>';
+  for (var d=1; d<=days; d++) {
+    var dow = dayOfWeek(y,m,d);
+    var bg = getHolidayName(y+'-'+pad(m)+'-'+pad(d)) ? 'background:#fff8e1;'
+           : (dow===0 ? 'background:#fce4ec;' : (dow===6 ? 'background:#e8eaf6;' : ''));
+    html += '<th style="'+bg+'">'+d+'<br><span style="font-size:0.7rem">'+WEEKDAYS[dow]+'</span></th>';
+  }
+  html += '</tr></thead><tbody>';
+  var anyShift = false;
+  for (var i=0; i<list.length; i++) {
+    var s = list[i];
+    html += '<tr><td style="white-space:nowrap">'+esc(s.name)+'</td>'
+         +  '<td style="white-space:nowrap;font-size:0.75rem">'+esc(s.role||'')+'</td>';
+    for (var d=1; d<=days; d++) {
+      var v = getHoikuShift(s.id, y, m, d);
+      if (v) anyShift = true;
+      html += '<td style="font-size:0.7rem;padding:2px">'+esc(v)+'</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
+  if (!anyShift) {
+    html += '<p class="notice notice-warning">'+y+'年'+m+'月の勤務がまだ入力されていません。'
+         +  '管理者モード →「保育士管理」タブの「保育士の勤務入力」で入力してください。</p>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function runReport() {
   fetchAggregateData(runReportInner);
 }
@@ -2348,6 +2695,7 @@ function runReportInner() {
   populateReportDept(y, m);
   html += buildCostSection(y, m);
   html += buildShiftSection(y, m);
+  html += buildHoikuStaffShiftSection(y, m);
   document.getElementById('rpt-result').innerHTML = html;
 }
 
@@ -2437,6 +2785,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
     document.getElementById('rpt-dept').addEventListener('change', onReportDeptChange);
+    document.getElementById('hstaff-form').addEventListener('submit', submitHoikuStaff);
+    document.getElementById('hss-year').addEventListener('change', renderHoikuShiftGrid);
+    document.getElementById('hss-month').addEventListener('change', renderHoikuShiftGrid);
+    document.getElementById('hss-bulk-weekday').addEventListener('click', hoikuShiftBulkWeekday);
+    document.getElementById('hss-copy-prev').addEventListener('click', hoikuShiftCopyPrev);
+    document.getElementById('hss-clear').addEventListener('click', hoikuShiftClear);
     document.getElementById('rpt-all-excel').addEventListener('click', function(){ fetchAggregateData(exportHoikuAllExcel); });
     document.getElementById('rpt-form-excel').addEventListener('click', function(){ fetchAggregateData(exportHoikuFormExcel); });
     document.getElementById('hadmin-toggle').addEventListener('click', toggleHoikuAdmin);

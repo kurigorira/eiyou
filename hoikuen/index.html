@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20260925b">
+<link rel="stylesheet" href="style.css?v=20260925c">
 </head>
 <body>
 <div id="app">
@@ -16,6 +16,7 @@
       <button class="tab-btn" data-tab="report">集計</button>
       <button class="tab-btn" data-tab="history">入力履歴</button>
       <button class="tab-btn admin-only" data-tab="children" style="display:none">子供管理</button>
+      <button class="tab-btn admin-only" data-tab="hstaff" style="display:none">保育士管理</button>
       <button class="tab-btn admin-only" data-tab="master" style="display:none">料金・勤務区分</button>
       <button class="tab-btn admin-only" data-tab="hsettings" style="display:none">設定</button>
       <button class="tab-btn tab-btn-admin" id="hadmin-toggle">管理者</button>
@@ -175,6 +176,44 @@
       </div>
     </section>
 
+    <!-- 保育士管理（管理者） -->
+    <section id="tab-hstaff" class="tab-content">
+      <h2>保育士管理</h2>
+      <div class="card">
+        <h3>保育士の登録</h3>
+        <p class="help-text">保育園で働く職員（保育士）です。ここで登録した方の勤務が、食事注文表Excelの各シートの一番下に出ます。</p>
+        <form id="hstaff-form" class="inline-form">
+          <input type="text" id="hs-name" placeholder="氏名" style="width:160px" required>
+          <input type="text" id="hs-role" placeholder="職種（任意・例: 保育士／調理）" style="width:200px">
+          <button type="submit" class="btn">追加</button>
+        </form>
+        <table class="data-table" style="margin-top:10px;max-width:640px">
+          <thead><tr><th>氏名</th><th>職種</th><th>並び順</th><th>操作</th></tr></thead>
+          <tbody id="hstaff-list"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>保育士の勤務入力</h3>
+        <p class="help-text">月ごとの勤務表です。マス目に直接入力してください（例: 早番／日勤／遅番／休）。入力するとその場で保存されます。</p>
+        <div class="inline-form">
+          <label>年月:
+            <select id="hss-year"></select>年
+            <select id="hss-month"></select>月
+          </label>
+          <label>一括:
+            <input type="text" id="hss-bulk-value" list="hss-values" placeholder="例: 日勤" style="width:110px">
+          </label>
+          <button class="btn btn-outline" id="hss-bulk-weekday">平日にまとめて入れる</button>
+          <button class="btn btn-outline" id="hss-copy-prev">前月コピー</button>
+          <button class="btn btn-danger-outline" id="hss-clear">当月クリア</button>
+          <span id="hss-status" class="help-text"></span>
+        </div>
+        <datalist id="hss-values"></datalist>
+        <div id="hss-grid" style="margin-top:10px;overflow-x:auto"></div>
+      </div>
+    </section>
+
     <!-- 料金・勤務区分（管理者） -->
     <section id="tab-master" class="tab-content">
       <h2>料金・勤務区分</h2>
@@ -284,7 +323,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20260925b"></script>
-<script src="app.js?v=20260925b"></script>
+<script src="../xlsx.js?v=20260925c"></script>
+<script src="app.js?v=20260925c"></script>
 </body>
 </html>
