@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20260924d">
+<link rel="stylesheet" href="style.css?v=20260925a">
 </head>
 <body>
 <div id="app">
@@ -116,11 +116,15 @@
           <select id="rpt-year"></select>年
           <select id="rpt-month"></select>月
         </label>
+        <label>部署:
+          <select id="rpt-dept"><option value="">全部署</option></select>
+        </label>
         <button class="btn" id="rpt-run">集計実行</button>
         <button class="btn btn-outline" id="rpt-form-excel">食事注文表Excel（当月）</button>
         <button class="btn btn-outline" id="rpt-all-excel">全期間Excel出力（月別シート）</button>
         <button class="btn btn-outline" id="rpt-print">印刷</button>
       </div>
+      <p class="help-text">部署を選ぶと「職員別 食事代」と「職員別 勤務区分」がその部署だけになります（Excel出力・印刷にも反映されます）。</p>
       <div id="rpt-result"></div>
     </section>
 
@@ -280,7 +284,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20260924d"></script>
-<script src="app.js?v=20260924d"></script>
+<script src="../xlsx.js?v=20260925a"></script>
+<script src="app.js?v=20260925a"></script>
 </body>
 </html>

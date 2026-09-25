@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-24d';
+var APP_VERSION = '2026-09-25a';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -2026,30 +2026,30 @@ function buildHoikuMonthSheet(y, m) {
   sheet.rows.push(foot);
   sheet.merges.push('A'+totRow+':'+xlsxColLetter(4+NM)+totRow);
 
-  // 勤務区分（各日の各職員）
+  // 勤務区分（各日の各職員）。画面で選んだ部署の絞り込みをそのまま反映する
+  var deptSel = getReportDept();
   sheet.rows.push([]);
   var sr = sheet.rows.length + 1;
-  var shTitle = [XC(y+'年'+m+'月 職員別 勤務区分', 3)];
-  for (var c=1; c<2+days; c++) shTitle.push(XC('',3));
+  var shTitle = [XC(y+'年'+m+'月 職員別 勤務区分' + (deptSel ? '　【'+deptSel+'】' : ''), 3)];
+  for (var c=1; c<3+days; c++) shTitle.push(XC('',3));
   sheet.rows.push(shTitle);
-  sheet.merges.push('A'+sr+':'+xlsxColLetter(1+days)+sr);
+  sheet.merges.push('A'+sr+':'+xlsxColLetter(2+days)+sr);
 
-  var ym = y + '-' + pad(m);
-  var month = shifts[ym] || {};
-  var idSet = {};
-  for (var i=0; i<rows.length; i++) idSet[rows[i].staffId] = true;
-  for (var sid in month) idSet[sid] = true;
-  var ids = Object.keys(idSet).sort();
+  var allIds = reportStaffIds(y, m);
+  var ids = [];
+  for (var i=0; i<allIds.length; i++) if (matchReportDept(allIds[i])) ids.push(allIds[i]);
 
-  var sh = [XC('職員ID',1), XC('氏名',1)];
+  var sh = [XC('職員ID',1), XC('氏名',1), XC('部署',1)];
   for (var d=1; d<=days; d++) sh.push(XC(d, dayFillStyle(y,m,d,true)));
   sheet.rows.push(sh);
-  if (ids.length === 0) {
+  if (allIds.length === 0) {
     sheet.rows.push([XC('勤務区分は取り込まれていません', 4)]);
+  } else if (ids.length === 0) {
+    sheet.rows.push([XC(deptSel + ' に該当する職員がいません', 4)]);
   } else {
     for (var i=0; i<ids.length; i++) {
       var st = getStaffById(ids[i]);
-      var r2 = [XC(ids[i],4), XC(st?st.name:'',4)];
+      var r2 = [XC(ids[i],4), XC(st?st.name:'',4), XC(staffDept(ids[i]),4)];
       for (var d=1; d<=days; d++) r2.push(XC(getShift(ids[i], y, m, d), dayFillStyle(y,m,d,false)));
       sheet.rows.push(r2);
     }
@@ -2059,8 +2059,13 @@ function buildHoikuMonthSheet(y, m) {
 
 // ==================== 食事代・勤務区分セクション ====================
 function buildCostSection(y, m) {
-  var rows = staffMonthCostRows(y, m);
-  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 職員別 食事代</h3>';
+  var allRows = staffMonthCostRows(y, m);
+  var rows = [];
+  for (var i=0; i<allRows.length; i++) if (matchReportDept(allRows[i].staffId)) rows.push(allRows[i]);
+  var deptSel = getReportDept();
+  var title = y+'年'+m+'月 職員別 食事代'
+            + (deptSel ? '　<span style="font-size:0.85rem;font-weight:normal">【'+esc(deptSel)+'】</span>' : '');
+  var html = '<div class="rpt-section"><h3>'+title+'</h3>';
   var unset = true;
   for (var i=0; i<CHILD_CATEGORIES.length; i++) {
     for (var k=0; k<MEAL_KEYS.length; k++) {
@@ -2072,7 +2077,10 @@ function buildCostSection(y, m) {
           + '職員給食システムの管理者モード →「保育園マスタ」タブで単価を設定してください。</p>';
   }
   if (rows.length === 0) {
-    html += '<p class="help-text">確定済みの注文がありません。</p></div>';
+    html += '<p class="help-text">'
+         +  (allRows.length === 0 ? '確定済みの注文がありません。'
+                                  : esc(deptSel) + ' に確定済みの注文がありません。（全'+allRows.length+'名）')
+         +  '</p></div>';
     return html;
   }
   html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr>';
@@ -2110,23 +2118,83 @@ function buildCostSection(y, m) {
   return html;
 }
 
-function buildShiftSection(y, m) {
-  var days = daysInMonth(y, m);
+// ==================== 集計の部署絞り込み ====================
+var DEPT_NONE = '（部署未設定）';
+
+function staffDept(staffId) {
+  var st = getStaffById(staffId);
+  var d = st && st.dept ? String(st.dept).trim() : '';
+  return d === '' ? DEPT_NONE : d;
+}
+function getReportDept() {
+  var el = document.getElementById('rpt-dept');
+  return el ? el.value : '';
+}
+// 選んだ部署に含まれるか（空欄は全部署）
+function matchReportDept(staffId) {
+  var sel = getReportDept();
+  return sel === '' || staffDept(staffId) === sel;
+}
+
+// 集計の対象になる職員ID（注文がある人＋勤務区分が入っている人）
+function reportStaffIds(y, m) {
   var ym = y + '-' + pad(m);
   var month = shifts[ym] || {};
-  // 保護者として注文がある職員＋勤務区分が登録されている職員を対象にする
   var idSet = {};
   var rows = staffMonthCostRows(y, m);
   for (var i=0; i<rows.length; i++) idSet[rows[i].staffId] = true;
   for (var sid in month) idSet[sid] = true;
-  var ids = Object.keys(idSet).sort();
-  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 職員別 勤務区分</h3>';
-  if (ids.length === 0) {
+  return Object.keys(idSet).sort();
+}
+
+// 部署の選択肢を、実際に集計対象になる職員の部署だけで作る
+function populateReportDept(y, m) {
+  var sel = document.getElementById('rpt-dept');
+  if (!sel) return;
+  var cur = sel.value;
+  var ids = reportStaffIds(y, m);
+  var counts = {};
+  for (var i=0; i<ids.length; i++) {
+    var d = staffDept(ids[i]);
+    counts[d] = (counts[d] || 0) + 1;
+  }
+  var names = Object.keys(counts).sort(function(a, b) {
+    // 「（部署未設定）」は最後に置く
+    if (a === DEPT_NONE) return 1;
+    if (b === DEPT_NONE) return -1;
+    return a < b ? -1 : (a > b ? 1 : 0);
+  });
+  var html = '<option value="">全部署（' + ids.length + '名）</option>';
+  for (var i=0; i<names.length; i++) {
+    html += '<option value="' + esc(names[i]) + '">' + esc(names[i]) + '（' + counts[names[i]] + '名）</option>';
+  }
+  sel.innerHTML = html;
+  // 前回選んでいた部署が残っていれば維持する
+  sel.value = cur;
+  if (sel.selectedIndex < 0) sel.value = '';
+}
+
+function buildShiftSection(y, m) {
+  var days = daysInMonth(y, m);
+  var all = reportStaffIds(y, m);
+  var ids = [];
+  for (var i=0; i<all.length; i++) if (matchReportDept(all[i])) ids.push(all[i]);
+  var deptSel = getReportDept();
+  var title = y+'年'+m+'月 職員別 勤務区分'
+            + (deptSel ? '　<span style="font-size:0.85rem;font-weight:normal">【'+esc(deptSel)+'】</span>' : '');
+  var html = '<div class="rpt-section"><h3>'+title+'</h3>';
+  if (all.length === 0) {
     html += '<p class="help-text">勤務区分が取り込まれていません。'
-         +  '職員給食システムの管理者モード →「保育園マスタ」タブで取り込んでください。</p></div>';
+         +  '「料金・勤務区分」タブで取り込むか、「勤務区分の手入力」で入力してください。</p></div>';
     return html;
   }
-  html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th>';
+  if (ids.length === 0) {
+    html += '<p class="help-text">'+esc(deptSel)+' に該当する職員がいません。</p></div>';
+    return html;
+  }
+  html += '<p class="help-text">'+ids.length+'名を表示しています'
+       +  (deptSel ? '（全'+all.length+'名中）' : '') + '</p>';
+  html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th><th>部署</th>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
     var bg = getHolidayName(y+'-'+pad(m)+'-'+pad(d)) ? 'background:#fff8e1;'
@@ -2136,7 +2204,8 @@ function buildShiftSection(y, m) {
   html += '</tr></thead><tbody>';
   for (var i=0; i<ids.length; i++) {
     var st = getStaffById(ids[i]);
-    html += '<tr><td>'+esc(ids[i])+'</td><td style="white-space:nowrap">'+esc(st?st.name:'')+'</td>';
+    html += '<tr><td>'+esc(ids[i])+'</td><td style="white-space:nowrap">'+esc(st?st.name:'')+'</td>'
+         +  '<td style="white-space:nowrap;font-size:0.75rem">'+esc(staffDept(ids[i]))+'</td>';
     for (var d=1; d<=days; d++) {
       var v = getShift(ids[i], y, m, d);
       html += '<td style="font-size:0.7rem;padding:2px">'+esc(v)+'</td>';
@@ -2228,9 +2297,16 @@ function runReportInner() {
     html += '<td>'+dayTotal+'</td></tr>';
   }
   html += '</tbody></table></div>';
+  populateReportDept(y, m);
   html += buildCostSection(y, m);
   html += buildShiftSection(y, m);
   document.getElementById('rpt-result').innerHTML = html;
+}
+
+// 部署を変えたときは、取得済みのデータのまま描き直す（再取得はしない）
+function onReportDeptChange() {
+  if (!document.getElementById('rpt-result').innerHTML) return;
+  runReportInner();
 }
 
 // ==================== HISTORY TAB ====================
@@ -2312,6 +2388,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('order-unconfirm').addEventListener('click', unconfirmOrder);
 
     document.getElementById('rpt-run').addEventListener('click', runReport);
+    document.getElementById('rpt-dept').addEventListener('change', onReportDeptChange);
     document.getElementById('rpt-all-excel').addEventListener('click', function(){ fetchAggregateData(exportHoikuAllExcel); });
     document.getElementById('rpt-form-excel').addEventListener('click', function(){ fetchAggregateData(exportHoikuFormExcel); });
     document.getElementById('hadmin-toggle').addEventListener('click', toggleHoikuAdmin);
