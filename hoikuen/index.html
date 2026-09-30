@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20260925c">
+<link rel="stylesheet" href="style.css?v=20260930a">
 </head>
 <body>
 <div id="app">
@@ -180,8 +180,12 @@
     <section id="tab-hstaff" class="tab-content">
       <h2>保育士管理</h2>
       <div class="card">
-        <h3>保育士の登録</h3>
-        <p class="help-text">保育園で働く職員（保育士）です。ここで登録した方の勤務が、食事注文表Excelの各シートの一番下に出ます。</p>
+        <h3>保育士の登録（職員マスタに無い方のみ）</h3>
+        <p class="help-text">
+          <strong>通常この画面は使いません。</strong>保育園の職員は職員マスタに部署「保育園」で登録されており、
+          勤務区分も勤務管理データベースから自動で取り込まれます。<br>
+          職員マスタに載っていない方（パート・外部委託など）がいる場合だけ、ここで登録してください。
+          登録した方は、食事注文表Excelの勤務表に続けて出ます。</p>
         <form id="hstaff-form" class="inline-form">
           <input type="text" id="hs-name" placeholder="氏名" style="width:160px" required>
           <input type="text" id="hs-role" placeholder="職種（任意・例: 保育士／調理）" style="width:200px">
@@ -308,6 +312,17 @@
     <section id="tab-hsettings" class="tab-content">
       <h2>設定</h2>
       <div class="card">
+        <h3>保育園の部署名</h3>
+        <p class="help-text">職員マスタで保育園の職員に設定されている<strong>部署名</strong>です。
+          この部署の職員の勤務表が、食事注文表Excelの各シートの一番下に出ます。</p>
+        <div class="inline-form">
+          <input type="text" id="hdept-input" placeholder="保育園" style="width:200px">
+          <button class="btn" id="hdept-save">保存</button>
+          <span id="hdept-status" class="help-text"></span>
+        </div>
+        <p id="hdept-preview" class="help-text" style="margin-top:6px"></p>
+      </div>
+      <div class="card">
         <h3>保育園 管理者パスワード</h3>
         <p class="help-text">保育園食システムの管理者モード専用のパスワードです。職員給食システムとは別に管理されます。</p>
         <div class="inline-form">
@@ -323,7 +338,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20260925c"></script>
-<script src="app.js?v=20260925c"></script>
+<script src="../xlsx.js?v=20260930a"></script>
+<script src="app.js?v=20260930a"></script>
 </body>
 </html>

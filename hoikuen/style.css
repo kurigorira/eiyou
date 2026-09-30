@@ -344,3 +344,9 @@ input[type="text"], input[type="date"], select {
   text-align: center;
 }
 .hss-cell:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+
+/* 集計の部署見出し行 */
+.rpt-table tr.dept-row td {
+  background: var(--primary-light);
+  border-top: 2px solid var(--primary);
+}
