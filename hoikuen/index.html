@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20260930b">
+<link rel="stylesheet" href="style.css?v=20260930c">
 </head>
 <body>
 <div id="app">
@@ -16,7 +16,7 @@
       <button class="tab-btn" data-tab="report">集計</button>
       <button class="tab-btn" data-tab="history">入力履歴</button>
       <button class="tab-btn admin-only" data-tab="children" style="display:none">子供管理</button>
-      <button class="tab-btn admin-only" data-tab="hstaff" style="display:none">保育士管理</button>
+      <button class="tab-btn admin-only" data-tab="hstaff" style="display:none">保育園職員</button>
       <button class="tab-btn admin-only" data-tab="master" style="display:none">料金・勤務区分</button>
       <button class="tab-btn admin-only" data-tab="hsettings" style="display:none">設定</button>
       <button class="tab-btn tab-btn-admin" id="hadmin-toggle">管理者</button>
@@ -181,7 +181,37 @@
 
     <!-- 保育士管理（管理者） -->
     <section id="tab-hstaff" class="tab-content">
-      <h2>保育士管理</h2>
+      <h2>保育園職員</h2>
+
+      <div class="card">
+        <h3>保育園の職員を選ぶ</h3>
+        <p class="help-text">
+          ここで選んだ職員の勤務が、<strong>食事注文表Excelの各シートの一番下</strong>に出ます。<br>
+          保育園が総務課などの中に含まれていて部署では区別できない場合は、ここで個別に選んでください。
+          勤務区分は勤務管理データベースから取り込んだものがそのまま使われます。</p>
+        <div class="inline-form">
+          <label>部署で絞り込み:
+            <select id="hm-dept"><option value="">全部署</option></select>
+          </label>
+          <input type="text" id="hm-search" placeholder="氏名・職員IDで検索" style="width:190px">
+          <button class="btn btn-outline" id="hm-add-dept">表示中の職員をまとめて追加</button>
+          <button class="btn btn-danger-outline" id="hm-clear">選択をすべて解除</button>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px">
+          <div style="flex:1;min-width:280px">
+            <strong style="font-size:0.9rem">職員一覧</strong>
+            <div id="hm-list" style="max-height:320px;overflow-y:auto;border:1px solid var(--border);
+                 border-radius:4px;padding:6px;margin-top:4px"></div>
+          </div>
+          <div style="flex:1;min-width:260px">
+            <strong style="font-size:0.9rem">保育園の職員（<span id="hm-count">0</span>名）</strong>
+            <div id="hm-selected" style="max-height:320px;overflow-y:auto;border:1px solid var(--border);
+                 border-radius:4px;padding:6px;margin-top:4px"></div>
+          </div>
+        </div>
+        <p id="hm-status" class="help-text" style="margin-top:6px"></p>
+      </div>
+
       <div class="card">
         <h3>保育士の登録（職員マスタに無い方のみ）</h3>
         <p class="help-text">
@@ -341,7 +371,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20260930b"></script>
-<script src="app.js?v=20260930b"></script>
+<script src="../xlsx.js?v=20260930c"></script>
+<script src="app.js?v=20260930c"></script>
 </body>
 </html>

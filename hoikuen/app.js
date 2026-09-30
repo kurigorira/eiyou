@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-30b';
+var APP_VERSION = '2026-09-30c';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -23,6 +23,7 @@ var hoikuConfig = {};    // 保育園専用の設定（管理者パスワード�
 var hoikuStaff = [];     // 保育園で働く職員（保育士）[{id, name, role}]
 var hoikuShifts = {};    // 保育士の勤務 {年月: {保育士ID: {日: '早番'}}}
 var shiftDepts = {};     // 勤務管理DBから取り込んだ部署CD {年月: {職員ID: '014'}}
+var hoikuMembers = [];   // 保育園の職員として選んだ職員ID（部署で区別できない場合に使う）
 var hAdminMode = false;
 var toastTimer = null;
 var orderLocked = true;
@@ -52,6 +53,7 @@ function loadData() {
     hoikuStaff = d.hoiku_staff || [];
     hoikuShifts = d.hoiku_shifts || {};
     shiftDepts = d.shift_depts || {};
+    hoikuMembers = d.hoiku_members || [];
   });
 }
 
@@ -372,31 +374,36 @@ function isHoikuDeptName(dept) {
   if (d === target) return true;
   return d.indexOf(target) >= 0 || target.indexOf(d) >= 0;
 }
-// 部署が保育園の職員を、氏名順で返す。
-// 勤務管理DBから取り込んだ部署CD（保育園=014）を優先し、
-// 取り込み前は職員マスタの部署名で拾う。
+// 保育園の職員を氏名順で返す。
+// ① 「保育園職員」タブで個別に選んだ職員があればそれを使う
+//    （保育園が総務課などに含まれていて、部署では区別できない場合）
+// ② 選んでいなければ、部署が保育園の職員を自動で拾う
 function getHoikuDeptStaff() {
   var target = getHoikuDeptName();
   var byId = {};
   for (var i=0; i<staffList.length; i++) byId[staffList[i].id] = staffList[i];
 
   var picked = {};
-  // ① 取り込んだ部署CDが保育園の職員
-  var ym = currentReportYm();
-  var map = (ym && shiftDepts[ym]) ? shiftDepts[ym] : null;
-  if (map) {
-    for (var sid in map) {
-      if (deptNameByCode(map[sid]) === target) picked[sid] = true;
+  if (hoikuMembers.length > 0) {
+    for (var i=0; i<hoikuMembers.length; i++) picked[hoikuMembers[i]] = true;
+  } else {
+    // 取り込んだ部署CDが保育園の職員
+    var ym = currentReportYm();
+    var map = (ym && shiftDepts[ym]) ? shiftDepts[ym] : null;
+    if (map) {
+      for (var sid in map) {
+        if (deptNameByCode(map[sid]) === target) picked[sid] = true;
+      }
     }
-  }
-  // ② 職員マスタの部署名が保育園の職員
-  for (var i=0; i<staffList.length; i++) {
-    if (isHoikuDeptName(staffList[i].dept)) picked[staffList[i].id] = true;
+    // 職員マスタの部署名が保育園の職員
+    for (var i=0; i<staffList.length; i++) {
+      if (isHoikuDeptName(staffList[i].dept)) picked[staffList[i].id] = true;
+    }
   }
 
   var list = [];
   for (var sid in picked) {
-    list.push(byId[sid] || {id: sid, name: '', dept: target});
+    list.push(byId[sid] || {id: sid, name: '', dept: ''});
   }
   list.sort(function(a, b) {
     var na = a.name || a.id, nb = b.name || b.id;
@@ -404,6 +411,185 @@ function getHoikuDeptStaff() {
   });
   return list;
 }
+
+// ==================== 保育園の職員を個別に選ぶ ====================
+function isHoikuMember(id) {
+  for (var i=0; i<hoikuMembers.length; i++) if (hoikuMembers[i] === id) return true;
+  return false;
+}
+function saveHoikuMembers() { apiSave('hoiku_members', hoikuMembers); }
+
+function toggleHoikuMember(id, on) {
+  if (on && !isHoikuMember(id)) hoikuMembers.push(id);
+  if (!on) {
+    var next = [];
+    for (var i=0; i<hoikuMembers.length; i++) if (hoikuMembers[i] !== id) next.push(hoikuMembers[i]);
+    hoikuMembers = next;
+  }
+  saveHoikuMembers();
+  renderHoikuMemberUI();
+}
+
+function initHoikuMemberTab() {
+  var sel = document.getElementById('hm-dept');
+  if (!sel) return;
+  var get = function(k) { return fetch(API_URL + '?key=' + k + '&t=' + Date.now()).then(function(r){return r.json();}); };
+  Promise.all([get('staff'), get('hoiku_members'), get('shift_depts')]).then(function(res) {
+    staffList    = res[0] || [];
+    hoikuMembers = res[1] || [];
+    shiftDepts   = res[2] || {};
+  }).catch(function(){}).then(function() {
+    populateHoikuMemberDept();
+    renderHoikuMemberUI();
+  });
+}
+
+// 職員の部署名（年月に依存しない。取り込んだ部署CDのうち最も新しい月を使う）
+function staffDeptAny(staffId) {
+  var months = [];
+  for (var ym in shiftDepts) months.push(ym);
+  months.sort();
+  for (var i=months.length-1; i>=0; i--) {
+    var c = shiftDepts[months[i]][staffId];
+    if (c) {
+      var n = deptNameByCode(c);
+      if (n !== '') return n;
+    }
+  }
+  var st = getStaffById(staffId);
+  var d = st && st.dept ? String(st.dept).trim() : '';
+  return d === '' ? DEPT_NONE : d;
+}
+
+function populateHoikuMemberDept() {
+  var sel = document.getElementById('hm-dept');
+  if (!sel) return;
+  var cur = sel.value;
+  var counts = {};
+  for (var i=0; i<staffList.length; i++) {
+    var d = staffDeptAny(staffList[i].id);
+    counts[d] = (counts[d] || 0) + 1;
+  }
+  var names = Object.keys(counts).sort(function(a, b) {
+    if (a === DEPT_NONE) return 1;
+    if (b === DEPT_NONE) return -1;
+    var ka = deptSortKey(a), kb = deptSortKey(b);
+    return ka < kb ? -1 : (ka > kb ? 1 : 0);
+  });
+  var html = '<option value="">全部署（' + staffList.length + '名）</option>';
+  for (var i=0; i<names.length; i++) {
+    html += '<option value="' + esc(names[i]) + '">'
+         +  esc(deptLabel(names[i]) + '（' + counts[names[i]] + '名）') + '</option>';
+  }
+  sel.innerHTML = html;
+  sel.value = cur;
+  if (sel.selectedIndex < 0) sel.value = '';
+}
+
+// 絞り込み条件に合う職員
+function filteredHoikuCandidates() {
+  var dept = document.getElementById('hm-dept').value;
+  var q = (document.getElementById('hm-search').value || '').toLowerCase();
+  var out = [];
+  for (var i=0; i<staffList.length; i++) {
+    var st = staffList[i];
+    if (dept && staffDeptAny(st.id) !== dept) continue;
+    if (q && st.id.toLowerCase().indexOf(q) === -1 &&
+        (st.name || '').toLowerCase().indexOf(q) === -1) continue;
+    out.push(st);
+  }
+  out.sort(function(a, b) {
+    var na = a.name || a.id, nb = b.name || b.id;
+    return na < nb ? -1 : (na > nb ? 1 : 0);
+  });
+  return out;
+}
+
+function renderHoikuMemberUI() {
+  var listEl = document.getElementById('hm-list');
+  var selEl  = document.getElementById('hm-selected');
+  var cntEl  = document.getElementById('hm-count');
+  if (!listEl) return;
+
+  var cands = filteredHoikuCandidates();
+  var html = '';
+  if (cands.length === 0) {
+    html = '<p class="placeholder-msg" style="padding:14px">該当する職員がいません</p>';
+  } else {
+    for (var i=0; i<cands.length; i++) {
+      var st = cands[i];
+      html += '<label style="display:block;padding:3px 4px;font-size:0.85rem;cursor:pointer">'
+           +  '<input type="checkbox" class="hm-cb" data-id="' + esc(st.id) + '"'
+           +  (isHoikuMember(st.id) ? ' checked' : '') + '> '
+           +  esc(st.name || '(氏名なし)')
+           +  ' <span style="color:#888;font-size:0.78rem">' + esc(st.id)
+           +  '／' + esc(staffDeptAny(st.id)) + '</span></label>';
+    }
+  }
+  listEl.innerHTML = html;
+  var cbs = listEl.querySelectorAll('input.hm-cb');
+  for (var i=0; i<cbs.length; i++) {
+    cbs[i].addEventListener('change', function() {
+      toggleHoikuMember(this.getAttribute('data-id'), this.checked);
+    });
+  }
+
+  // 選択中の一覧
+  var chosen = getHoikuDeptStaff();
+  if (cntEl) cntEl.textContent = hoikuMembers.length;
+  var html2 = '';
+  if (hoikuMembers.length === 0) {
+    html2 = '<p class="placeholder-msg" style="padding:14px;font-size:0.85rem">'
+          + '選んでいません。<br>この場合は部署「' + esc(getHoikuDeptName()) + '」の職員が自動で対象になります。</p>';
+  } else {
+    for (var i=0; i<chosen.length; i++) {
+      var c = chosen[i];
+      html2 += '<div style="padding:3px 4px;font-size:0.85rem;display:flex;justify-content:space-between;gap:6px">'
+            +  '<span>' + esc(c.name || '(氏名なし)')
+            +  ' <span style="color:#888;font-size:0.78rem">' + esc(c.id) + '</span></span>'
+            +  '<button class="btn-sm hm-del" data-id="' + esc(c.id) + '">外す</button></div>';
+    }
+  }
+  selEl.innerHTML = html2;
+  var dels = selEl.querySelectorAll('button.hm-del');
+  for (var i=0; i<dels.length; i++) {
+    dels[i].addEventListener('click', function() { toggleHoikuMember(this.getAttribute('data-id'), false); });
+  }
+}
+
+function addVisibleHoikuMembers() {
+  var cands = filteredHoikuCandidates();
+  if (cands.length === 0) { setHoikuMemberStatus('追加できる職員がいません', true); return; }
+  if (!confirm('表示中の ' + cands.length + '名を保育園の職員に追加します。よろしいですか？')) return;
+  var n = 0;
+  for (var i=0; i<cands.length; i++) {
+    if (!isHoikuMember(cands[i].id)) { hoikuMembers.push(cands[i].id); n++; }
+  }
+  saveHoikuMembers();
+  renderHoikuMemberUI();
+  setHoikuMemberStatus(n + '名を追加しました（合計 ' + hoikuMembers.length + '名）');
+  showToast(n + '名を追加しました');
+}
+
+function clearHoikuMembers() {
+  if (hoikuMembers.length === 0) return;
+  if (!confirm('選択をすべて解除しますか？\n\n解除すると、部署「' + getHoikuDeptName()
+             + '」の職員が自動で対象になります。')) return;
+  hoikuMembers = [];
+  saveHoikuMembers();
+  renderHoikuMemberUI();
+  setHoikuMemberStatus('選択を解除しました');
+  showToast('選択を解除しました');
+}
+
+function setHoikuMemberStatus(msg, isError) {
+  var el = document.getElementById('hm-status');
+  if (!el) return;
+  el.style.color = isError ? '#dc3545' : '';
+  el.textContent = msg;
+}
+
+// ==================== 保育士の個別登録（職員マスタに無い方の補助） ====================
 
 // 設定タブ: 保育園の部署名
 function renderHoikuDeptSetting() {
@@ -824,7 +1010,7 @@ function showTab(name) {
   if (name==='history') renderHistory();
   if (name==='children') initChildrenTab();
   if (name==='master') initMasterTab();
-  if (name==='hstaff') initHoikuStaffTab();
+  if (name==='hstaff') { initHoikuMemberTab(); initHoikuStaffTab(); }
   if (name==='hsettings') { renderHoikuPwStatus(); renderHoikuDeptSetting(); }
 }
 
@@ -835,7 +1021,7 @@ function fetchAggregateData(fn) {
   };
   Promise.all([get('hoiku_orders'), get('hoiku_confirmed'), get('prices'), get('shifts'),
                get('children'), get('shiftdefs'), get('hoiku_staff'), get('hoiku_shifts'),
-               get('shift_depts')])
+               get('shift_depts'), get('hoiku_members'), get('staff')])
     .then(function(res) {
       orders = res[0] || {};
       hoikuConfirmed = res[1] || {};
@@ -846,6 +1032,8 @@ function fetchAggregateData(fn) {
       hoikuStaff = res[6] || [];
       hoikuShifts = res[7] || {};
       shiftDepts = res[8] || {};
+      hoikuMembers = res[9] || [];
+      staffList = res[10] || staffList;
       fn();
     }).catch(function() { fn(); });
 }
@@ -2213,10 +2401,11 @@ function appendShiftBlock(sheet, y, m, days) {
   var deptName = getHoikuDeptName();
   var list = getHoikuDeptStaff();
   var extra = getHoikuStaffSorted();
+  var label = hoikuMembers.length > 0 ? '保育園の職員' : '部署: ' + deptName;
 
   sheet.rows.push([]);
   var tr = sheet.rows.length + 1;
-  var title = [XC(y+'年'+m+'月　部署: '+deptName+'　勤務表', 3)];
+  var title = [XC(y+'年'+m+'月　'+label+'　勤務表', 3)];
   for (var c=1; c<2+days; c++) title.push(XC('',3));
   sheet.rows.push(title);
   sheet.merges.push('A'+tr+':'+xlsxColLetter(1+days)+tr);
@@ -2226,7 +2415,7 @@ function appendShiftBlock(sheet, y, m, days) {
   sheet.rows.push(hdr);
 
   if (list.length === 0 && extra.length === 0) {
-    sheet.rows.push([XC('部署「'+deptName+'」の職員が職員マスタに登録されていません', 4)]);
+    sheet.rows.push([XC('保育園の職員が設定されていません（管理者モード →「保育園職員」タブで選んでください）', 4)]);
     return;
   }
   var anyShift = false;
@@ -2808,14 +2997,19 @@ function buildHoikuStaffShiftSection(y, m) {
   var deptName = getHoikuDeptName();
   var list = getHoikuDeptStaff();
   var extra = getHoikuStaffSorted();
-  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 部署: '+esc(deptName)+'　勤務表</h3>';
+  var byMembers = hoikuMembers.length > 0;
+  var title = byMembers ? '保育園の職員　勤務表' : '部署: '+esc(deptName)+'　勤務表';
+  var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 '+title+'</h3>';
   if (list.length === 0 && extra.length === 0) {
-    html += '<p class="notice notice-warning">職員マスタに部署「'+esc(deptName)+'」の職員が登録されていません。<br>'
-         +  '職員給食システムの管理者モード →「職員マスタ」で部署を「'+esc(deptName)+'」に設定するか、'
-         +  '部署名が違う場合は「設定」タブで変更してください。</p></div>';
+    html += '<p class="notice notice-warning">保育園の職員が設定されていません。<br>'
+         +  '管理者モード →「<strong>保育園職員</strong>」タブで対象の職員を選んでください。<br>'
+         +  '（保育園が独立した部署の場合は、職員マスタの部署を「'+esc(deptName)+'」にするだけでも対象になります）'
+         +  '</p></div>';
     return html;
   }
-  html += '<p class="help-text">食事注文表Excelの各シートの一番下に、この内容が出ます。</p>';
+  html += '<p class="help-text">食事注文表Excelの各シートの一番下に、この内容が出ます。'
+       +  (byMembers ? '（「保育園職員」タブで選んだ ' + hoikuMembers.length + '名）'
+                     : '（部署「' + esc(deptName) + '」の職員）') + '</p>';
   html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>氏名</th><th>職員ID</th>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
@@ -3031,6 +3225,10 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('rpt-run').addEventListener('click', runReport);
     document.getElementById('rpt-dept').addEventListener('change', onReportDeptChange);
     document.getElementById('hdept-save').addEventListener('click', saveHoikuDeptSetting);
+    document.getElementById('hm-dept').addEventListener('change', renderHoikuMemberUI);
+    document.getElementById('hm-search').addEventListener('input', renderHoikuMemberUI);
+    document.getElementById('hm-add-dept').addEventListener('click', addVisibleHoikuMembers);
+    document.getElementById('hm-clear').addEventListener('click', clearHoikuMembers);
     document.getElementById('hstaff-form').addEventListener('submit', submitHoikuStaff);
     document.getElementById('hss-year').addEventListener('change', renderHoikuShiftGrid);
     document.getElementById('hss-month').addEventListener('change', renderHoikuShiftGrid);
