@@ -95,7 +95,7 @@ header('Cache-Control: no-cache, no-store');
 
 // このファイルの版。画面に表示され、古い版がサーバーに残っている場合に警告する。
 // 内容を変更したら必ず更新すること。
-define('SYNC_VERSION', '2026-09-24c');
+define('SYNC_VERSION', '2026-09-30a');
 
 // 1つのドライバを試す際の接続待ち時間（秒）。順に試すので短めにする。
 define('CONNECT_TIMEOUT', 5);
@@ -785,6 +785,7 @@ $rawSamples = array();
 
 $unmapped = array();
 $mappedHow = array();
+$busyoOf   = array();   // 職員ID => 部署CD
 
 foreach ($rows as $r) {
     $cd  = trim((string)$r['Kojin']);
@@ -803,6 +804,10 @@ foreach ($rows as $r) {
     }
     if (!isset($mappedHow[$how])) $mappedHow[$how] = 0;
     $mappedHow[$how]++;
+
+    // JOYNUSの部署CDを職員IDごとに持ち帰る（給食システム側の部署分けに使う）
+    $bs = trim((string)$r['Busyo']);
+    if ($bs !== '') $busyoOf[$sid] = $bs;
 
     if ($debug && count($rawSamples) < 3) {
         $rawSamples[] = array(
@@ -835,6 +840,7 @@ $res = array(
     'count'       => $count,
     'staffCount'  => count($out),
     'unmapped'    => $unmappedList,     // 職員IDに対応づかなかった人
+    'busyo'       => $busyoOf,          // 職員ID => 部署CD（JOYNUSの部署）
 );
 if ($debug) {
     $res['debug'] = array(

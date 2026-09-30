@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-30a';
+var APP_VERSION = '2026-09-30b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -22,6 +22,7 @@ var shiftDefs = [];      // 勤務区分マスタ [{name, meals:{b,s1,l,s2,d}}]
 var hoikuConfig = {};    // 保育園専用の設定（管理者パスワード等）
 var hoikuStaff = [];     // 保育園で働く職員（保育士）[{id, name, role}]
 var hoikuShifts = {};    // 保育士の勤務 {年月: {保育士ID: {日: '早番'}}}
+var shiftDepts = {};     // 勤務管理DBから取り込んだ部署CD {年月: {職員ID: '014'}}
 var hAdminMode = false;
 var toastTimer = null;
 var orderLocked = true;
@@ -50,6 +51,7 @@ function loadData() {
     hoikuConfig = d.hoiku_config || {};
     hoikuStaff = d.hoiku_staff || [];
     hoikuShifts = d.hoiku_shifts || {};
+    shiftDepts = d.shift_depts || {};
   });
 }
 
@@ -370,11 +372,31 @@ function isHoikuDeptName(dept) {
   if (d === target) return true;
   return d.indexOf(target) >= 0 || target.indexOf(d) >= 0;
 }
-// 部署が保育園の職員を、氏名順で返す
+// 部署が保育園の職員を、氏名順で返す。
+// 勤務管理DBから取り込んだ部署CD（保育園=014）を優先し、
+// 取り込み前は職員マスタの部署名で拾う。
 function getHoikuDeptStaff() {
-  var list = [];
+  var target = getHoikuDeptName();
+  var byId = {};
+  for (var i=0; i<staffList.length; i++) byId[staffList[i].id] = staffList[i];
+
+  var picked = {};
+  // ① 取り込んだ部署CDが保育園の職員
+  var ym = currentReportYm();
+  var map = (ym && shiftDepts[ym]) ? shiftDepts[ym] : null;
+  if (map) {
+    for (var sid in map) {
+      if (deptNameByCode(map[sid]) === target) picked[sid] = true;
+    }
+  }
+  // ② 職員マスタの部署名が保育園の職員
   for (var i=0; i<staffList.length; i++) {
-    if (isHoikuDeptName(staffList[i].dept)) list.push(staffList[i]);
+    if (isHoikuDeptName(staffList[i].dept)) picked[staffList[i].id] = true;
+  }
+
+  var list = [];
+  for (var sid in picked) {
+    list.push(byId[sid] || {id: sid, name: '', dept: target});
   }
   list.sort(function(a, b) {
     var na = a.name || a.id, nb = b.name || b.id;
@@ -812,7 +834,8 @@ function fetchAggregateData(fn) {
     return fetch(API_URL + '?key=' + key + '&t=' + Date.now()).then(function(r) { return r.json(); });
   };
   Promise.all([get('hoiku_orders'), get('hoiku_confirmed'), get('prices'), get('shifts'),
-               get('children'), get('shiftdefs'), get('hoiku_staff'), get('hoiku_shifts')])
+               get('children'), get('shiftdefs'), get('hoiku_staff'), get('hoiku_shifts'),
+               get('shift_depts')])
     .then(function(res) {
       orders = res[0] || {};
       hoikuConfirmed = res[1] || {};
@@ -822,6 +845,7 @@ function fetchAggregateData(fn) {
       shiftDefs = res[5] || [];
       hoikuStaff = res[6] || [];
       hoikuShifts = res[7] || {};
+      shiftDepts = res[8] || {};
       fn();
     }).catch(function() { fn(); });
 }
@@ -1849,6 +1873,15 @@ function syncShiftsFromDb() {
         }
       }
       var ym = y + '-' + pad(m);
+      // 部署CDも一緒に保存する（集計の部署分けに使う）
+      var bs = res.busyo || {};
+      var hasBusyo = false;
+      for (var k in bs) { hasBusyo = true; break; }
+      if (hasBusyo) {
+        shiftDepts[ym] = bs;
+        var dp = {}; dp[ym] = bs;
+        apiMerge('shift_depts', dp, 1);
+      }
       saveShiftsForMonth(ym, res.shifts || {}, function(err) {
         if (err) { statusEl.style.color = '#dc3545'; statusEl.textContent = '保存に失敗: ' + err; return; }
         statusEl.style.color = '';
@@ -2552,13 +2585,100 @@ function buildCostSection(y, m) {
   return html;
 }
 
+// ==================== 部署マスタ（JOYNUSの部署分類） ====================
+// 勤務管理システムの部署コードのうち、当院で実際に使っている部署。
+// 除外: 001 2階病棟 / 002 3階病棟 / 003 4階病棟 / 006 精神科デイケア /
+//       007 介護 / 012 福祉用具 / 023 情報システム / 026 安全管理室 /
+//       027 その他 / 085 会議 / 098 テスト回復期 / 099 テスト病棟
+var HOSPITAL_DEPTS = [
+  {code:'004', name:'外来・手術'},
+  {code:'005', name:'健康管理センター'},
+  {code:'008', name:'通所リハ'},
+  {code:'009', name:'居宅'},
+  {code:'010', name:'訪問看護'},
+  {code:'011', name:'訪問介護'},
+  {code:'013', name:'総務'},
+  {code:'014', name:'保育園'},
+  {code:'015', name:'医療連携'},
+  {code:'016', name:'医事課'},
+  {code:'017', name:'薬剤部'},
+  {code:'018', name:'検査科'},
+  {code:'019', name:'放射線科'},
+  {code:'020', name:'リハビリテーション科'},
+  {code:'021', name:'栄養科'},
+  {code:'022', name:'看護部'},
+  {code:'024', name:'事務部'},
+  {code:'025', name:'臨床工学科'},
+  {code:'028', name:'新3階病棟'},
+  {code:'029', name:'新4階病棟'},
+  {code:'030', name:'新5階病棟'},
+  {code:'031', name:'医療秘書課'},
+  {code:'032', name:'透析室'},
+  {code:'033', name:'診療部'},
+  {code:'034', name:'医師事務支援'},
+  {code:'080', name:'新5階北'}
+];
+// 当院の部署分類から外している部署コード（画面では「対象外の部署」にまとめる）
+var EXCLUDED_DEPT_CODES = {
+  '001':'2階病棟', '002':'3階病棟', '003':'4階病棟', '006':'精神科デイケア',
+  '007':'介護', '012':'福祉用具', '023':'情報システム', '026':'安全管理室',
+  '027':'その他', '085':'会議', '098':'テスト回復期', '099':'テスト病棟'
+};
+
+function deptNameByCode(code) {
+  var c = String(code || '').trim();
+  if (c === '') return '';
+  for (var i=0; i<HOSPITAL_DEPTS.length; i++) if (HOSPITAL_DEPTS[i].code === c) return HOSPITAL_DEPTS[i].name;
+  if (EXCLUDED_DEPT_CODES[c]) return EXCLUDED_DEPT_CODES[c];
+  return '';
+}
+function deptCodeByName(name) {
+  var n = String(name || '').trim();
+  if (n === '') return '';
+  for (var i=0; i<HOSPITAL_DEPTS.length; i++) if (HOSPITAL_DEPTS[i].name === n) return HOSPITAL_DEPTS[i].code;
+  for (var c in EXCLUDED_DEPT_CODES) if (EXCLUDED_DEPT_CODES[c] === n) return c;
+  return '';
+}
+// 当院の部署分類から外れている部署か
+function isExcludedDept(name) {
+  var c = deptCodeByName(name);
+  return c !== '' && !!EXCLUDED_DEPT_CODES[c];
+}
+// 表示順: ①当院の部署（コード順） ②対象外の部署 ③不明な部署
+function deptSortKey(name) {
+  var c = deptCodeByName(name);
+  if (c === '') return 'z9_' + name;
+  if (EXCLUDED_DEPT_CODES[c]) return 'z5_' + c;
+  return '1_' + c;
+}
+// 一覧・見出しに出す表示名
+function deptLabel(name) {
+  var c = deptCodeByName(name);
+  if (c === '') return name;
+  return c + ' ' + name + (EXCLUDED_DEPT_CODES[c] ? '（対象外）' : '');
+}
+
 // ==================== 集計の部署絞り込み ====================
 var DEPT_NONE = '（部署未設定）';
 
+// その職員の部署。勤務管理DBから取り込んだ部署CDを優先し、
+// 無ければ職員マスタの部署名を使う。
 function staffDept(staffId) {
+  var ym = currentReportYm();
+  var code = (ym && shiftDepts[ym]) ? shiftDepts[ym][staffId] : '';
+  if (!code && shiftDepts.__latest) code = shiftDepts.__latest[staffId];
+  var byCode = deptNameByCode(code);
+  if (byCode !== '') return byCode;
   var st = getStaffById(staffId);
   var d = st && st.dept ? String(st.dept).trim() : '';
   return d === '' ? DEPT_NONE : d;
+}
+
+// 集計画面で選ばれている年月（部署CDの参照に使う）
+function currentReportYm() {
+  var ye = document.getElementById('rpt-year'), me = document.getElementById('rpt-month');
+  if (!ye || !me || !ye.value || !me.value) return '';
+  return ye.value + '-' + pad(parseInt(me.value, 10));
 }
 function getReportDept() {
   var el = document.getElementById('rpt-dept');
@@ -2581,7 +2701,8 @@ function reportStaffIds(y, m) {
   return Object.keys(idSet).sort();
 }
 
-// 部署の選択肢を、実際に集計対象になる職員の部署だけで作る
+// 部署の一覧を作る。部署マスタの順（部署コード順）に並べ、
+// 該当者がいない部署は出さない。
 function populateReportDept(y, m) {
   var sel = document.getElementById('rpt-dept');
   if (!sel) return;
@@ -2593,14 +2714,16 @@ function populateReportDept(y, m) {
     counts[d] = (counts[d] || 0) + 1;
   }
   var names = Object.keys(counts).sort(function(a, b) {
-    // 「（部署未設定）」は最後に置く
     if (a === DEPT_NONE) return 1;
     if (b === DEPT_NONE) return -1;
-    return a < b ? -1 : (a > b ? 1 : 0);
+    var ka = deptSortKey(a), kb = deptSortKey(b);
+    return ka < kb ? -1 : (ka > kb ? 1 : 0);
   });
   var html = '<option value="">全部署（' + ids.length + '名）</option>';
   for (var i=0; i<names.length; i++) {
-    html += '<option value="' + esc(names[i]) + '">' + esc(names[i]) + '（' + counts[names[i]] + '名）</option>';
+    var n = names[i];
+    html += '<option value="' + esc(n) + '">'
+         +  esc(deptLabel(n) + '（' + counts[n] + '名）') + '</option>';
   }
   sel.innerHTML = html;
   // 前回選んでいた部署が残っていれば維持する
@@ -2636,10 +2759,12 @@ function buildShiftSection(y, m) {
     if (!groups[dp]) { groups[dp] = []; order.push(dp); }
     groups[dp].push(ids[i]);
   }
+  // 部署コード順に並べる（部署マスタの順）
   order.sort(function(a, b) {
     if (a === DEPT_NONE) return 1;
     if (b === DEPT_NONE) return -1;
-    return a < b ? -1 : (a > b ? 1 : 0);
+    var ka = deptSortKey(a), kb = deptSortKey(b);
+    return ka < kb ? -1 : (ka > kb ? 1 : 0);
   });
 
   var ncol = 2 + days;
@@ -2654,9 +2779,14 @@ function buildShiftSection(y, m) {
   for (var g=0; g<order.length; g++) {
     var dp = order[g];
     var members = groups[dp];
-    // 部署の見出し行
-    html += '<tr class="dept-row"><td colspan="'+ncol+'" style="text-align:left;font-weight:bold">'
-         +  esc(dp) + '　<span style="font-weight:normal;font-size:0.8rem">（' + members.length + '名）</span></td></tr>';
+    // 部署の見出し行（部署コード＋部署名＋人数）
+    var dcode = deptCodeByName(dp);
+    var rowCls = 'dept-row' + (isExcludedDept(dp) ? ' dept-row-excluded' : '');
+    html += '<tr class="'+rowCls+'"><td colspan="'+ncol+'" style="text-align:left;font-weight:bold">'
+         +  (dcode ? '<span style="font-weight:normal;color:#666">'+esc(dcode)+'</span>　' : '')
+         +  esc(dp)
+         +  (isExcludedDept(dp) ? '<span style="font-weight:normal;font-size:0.75rem;color:#b26a00">（当院の部署分類の対象外）</span>' : '')
+         +  '　<span style="font-weight:normal;font-size:0.8rem">（' + members.length + '名）</span></td></tr>';
     for (var i=0; i<members.length; i++) {
       var sid = members[i];
       var st = getStaffById(sid);

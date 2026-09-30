@@ -350,3 +350,16 @@ input[type="text"], input[type="date"], select {
   background: var(--primary-light);
   border-top: 2px solid var(--primary);
 }
+
+/* 集計の部署リスト */
+#rpt-dept {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px;
+}
+#rpt-dept option { padding: 3px 6px; }
+#rpt-dept option:checked { background: var(--primary); color: #fff; }
+.rpt-table tr.dept-row-excluded td {
+  background: #fff8e1;
+  border-top: 2px solid var(--warning);
+}
