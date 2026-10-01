@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-09-30c';
+var APP_VERSION = '2026-10-01a';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -2050,7 +2050,7 @@ function syncShiftsFromDb() {
         return;
       }
       // 取り込めた場合でも、古い版が残っていれば知らせる
-      if (res.version !== EXPECTED_SYNC_VERSION) {
+      if (isSyncVersionOld(res.version)) {
         var pe = document.getElementById('shift-probe-result');
         if (pe) {
           pe.innerHTML = '<div class="notice" style="background:#dc3545;color:#fff;border:none;line-height:1.8">'
@@ -2130,7 +2130,17 @@ function probeShiftDb() {
 
 // この画面が想定している sync_shifts.php の版。
 // サーバーのファイルが古いと、直したはずの不具合が再発するため照合する。
-var EXPECTED_SYNC_VERSION = '2026-09-24c';
+// ※ sync_shifts.php の SYNC_VERSION を変えたら、ここも必ず同じ値にすること。
+var EXPECTED_SYNC_VERSION = '2026-09-30a';
+
+// サーバーの sync_shifts.php が、画面が想定する版より「古い」かどうか。
+// 版は 'YYYY-MM-DD<英字>' の形式なので文字列の大小で比較できる。
+// サーバーの方が新しい場合は警告しない（先にPHPだけ更新した場合に誤警告しないため）。
+function isSyncVersionOld(serverVersion) {
+  var sv = String(serverVersion || '').trim();
+  if (sv === '') return true;                 // 版の表示が無い＝かなり古い
+  return sv < EXPECTED_SYNC_VERSION;
+}
 
 // 接続テスト・同期エラーの内容を画面に分かりやすく表示する
 function renderProbeResult(res, isError) {
@@ -2142,7 +2152,7 @@ function renderProbeResult(res, isError) {
   var verWarn = '';
   if (!res.raw) {
     var sv = res.version || '';
-    if (sv !== EXPECTED_SYNC_VERSION) {
+    if (isSyncVersionOld(sv)) {
       verWarn = '<div class="notice" style="margin-bottom:10px;background:#dc3545;color:#fff;'
               + 'border:none;line-height:1.8">'
               + '<strong style="font-size:1.05rem">サーバーの sync_shifts.php が古い版です</strong><br>'
