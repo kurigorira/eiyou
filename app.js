@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-10-01a';
+var APP_VERSION = '2026-10-10a';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
@@ -2049,8 +2049,9 @@ function exportDetailExcel() {
   var ncol = 3 + days*NC + NC + 1;
   var lastCol = xlsxColLetter(ncol - 1);
   var sheet = {name:xlsxSanitizeName(y+'年'+m+'月注文一覧'), rows:[], merges:[], cols:[]};
-  sheet.cols.push(6); sheet.cols.push(10); sheet.cols.push(10);
-  for (var c=0; c<days*NC + NC + 1; c++) sheet.cols.push(3.5);
+  // 印刷でA4に収めやすいよう、日ごとのマスは狭くする
+  sheet.cols.push(8); sheet.cols.push(11); sheet.cols.push(11);
+  for (var c=0; c<days*NC + NC + 1; c++) sheet.cols.push(2.6);
   // 食事数合計ミニ表
   var mt = getMonthlyMealTotals(y, m);
   var mbSum = mt.b+mt.kb, mlSum = mt.l+mt.kl, mdSum = mt.d+mt.dd+mt.kd;
@@ -2134,19 +2135,83 @@ function exportDetailExcel() {
   for (var c=0; c<NC; c++) h2.push(XC(DETAIL_COLS[c].label, 1));
   h2.push(XC('',1));
   sheet.rows.push(h2);
-  // データ
+  // データ。あわせて日ごとの縦集計を数える
+  var dayTot = [];                      // dayTot[d-1][列] = 食数
+  for (var d=0; d<days; d++) {
+    var t = []; for (var c=0; c<NC; c++) t.push(0);
+    dayTot.push(t);
+  }
+  var colTot = []; for (var c=0; c<NC; c++) colTot.push(0);
+  var grandTot = 0;
+
   for (var i=0; i<staffWithOrders.length; i++) {
     var sw = staffWithOrders[i]; var s = sw.staff;
     var row = [XC(s.id,4), XC(s.name,4), XC(s.dept,4)];
     for (var d=1; d<=days; d++) {
       var cell = sw.perDay[d-1];
       var st = dayFillStyle(y,m,d,false);
-      for (var c=0; c<NC; c++) row.push(XC(cell[DETAIL_COLS[c].k]?'○':'', st));
+      for (var c=0; c<NC; c++) {
+        var on = !!cell[DETAIL_COLS[c].k];
+        if (on) dayTot[d-1][c]++;
+        row.push(XC(on?'○':'', st));
+      }
     }
-    for (var c=0; c<NC; c++) row.push(XC(sw.totals[DETAIL_COLS[c].k], 3));
+    for (var c=0; c<NC; c++) {
+      row.push(XC(sw.totals[DETAIL_COLS[c].k], 3));
+      colTot[c] += sw.totals[DETAIL_COLS[c].k];
+    }
     row.push(XC(sw.totals.all, 3));
+    grandTot += sw.totals.all;
     sheet.rows.push(row);
   }
+
+  // ===== 日別の縦集計 =====
+  // ① 区分ごと（朝/昼/夕/医/検朝/検昼/検夕）の日計
+  var sumRow = sheet.rows.length + 1;
+  var rs = [XC('日計',1), XC('',1), XC('',1)];
+  for (var d=1; d<=days; d++) {
+    var st2 = dayFillStyle(y,m,d,true);
+    for (var c=0; c<NC; c++) rs.push(XC(dayTot[d-1][c], st2));
+  }
+  for (var c=0; c<NC; c++) rs.push(XC(colTot[c], 3));
+  rs.push(XC(grandTot, 3));
+  sheet.rows.push(rs);
+  sheet.merges.push('A'+sumRow+':C'+sumRow);
+
+  // ② その日の合計（区分をまとめた1日あたりの食数）
+  var sumRow2 = sheet.rows.length + 1;
+  var rs2 = [XC('その日の合計',1), XC('',1), XC('',1)];
+  for (var d=1; d<=days; d++) {
+    var dayAll = 0;
+    for (var c=0; c<NC; c++) dayAll += dayTot[d-1][c];
+    var st3 = dayFillStyle(y,m,d,true);
+    rs2.push(XC(dayAll, st3));
+    for (var c=1; c<NC; c++) rs2.push(XC('', st3));
+    var c0 = 3 + (d-1)*NC;
+    sheet.merges.push(xlsxColLetter(c0)+sumRow2+':'+xlsxColLetter(c0+NC-1)+sumRow2);
+  }
+  for (var c=0; c<NC; c++) rs2.push(XC(c===0?grandTot:'', 3));
+  rs2.push(XC(grandTot, 3));
+  sheet.rows.push(rs2);
+  sheet.merges.push('A'+sumRow2+':C'+sumRow2);
+  var totC = 3 + days*NC;
+  sheet.merges.push(xlsxColLetter(totC)+sumRow2+':'+xlsxColLetter(totC+NC-1)+sumRow2);
+
+  // ===== A4で印刷しやすくする =====
+  // 1日あたり7列あるため1ページには収まらない。無理に縮めると読めなくなるので、
+  // A4横で DAYS_PER_PAGE 日ずつに区切り、各ページに見出しと氏名欄を繰り返す。
+  var DAYS_PER_PAGE = 8;
+  sheet.colBreaks = [];
+  for (var d = DAYS_PER_PAGE; d < days; d += DAYS_PER_PAGE) {
+    sheet.colBreaks.push(3 + d*NC);   // 0始まりの列番号＝その列の手前で改ページ
+  }
+  sheet.freeze = {row: h1Row + 1, col: 3};
+  sheet.page = {
+    paper: 9, landscape: true, scale: 70,
+    repeatRows: (h1Row) + ':' + (h1Row + 1),
+    repeatCols: 'A:C'
+  };
+
   downloadXlsx(sheet, '注文者一覧_'+y+'年'+pad(m)+'月.xlsx');
   showToast('Excelファイルを出力しました');
 }

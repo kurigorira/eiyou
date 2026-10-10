@@ -23,9 +23,36 @@ function xlsxCellXml(rowNum, colIdx, cell) {
   if (typeof cell.v === 'number') return '<c r="'+ref+'" s="'+s+'"><v>'+cell.v+'</v></c>';
   return '<c r="'+ref+'" s="'+s+'" t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(cell.v)+'</t></is></c>';
 }
+// 印刷設定。sheet.page に指定する:
+//   paper      用紙（9=A4。既定 9）
+//   landscape  true で横向き（既定 true）
+//   fitToWidth 横を何ページに収めるか（0 で指定なし。既定 1）
+//   fitToHeight 縦を何ページに収めるか（0 で制限なし。既定 0）
+//   repeatRows 各ページの先頭で繰り返す行（例 '1:3'）
+//   repeatCols 各ページの左端で繰り返す列（例 'A:C'）
+//   gridlines  true で枠線を印刷する
+// sheet.freeze に {row: n, col: n} を指定すると画面がそこで固定される。
 function xlsxSheetXml(sheet) {
+  var pg = sheet.page || null;
   var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
   xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  // ※ worksheet の子要素は順番が決まっている（sheetPr → sheetViews → cols →
+  //    sheetData → mergeCells → printOptions → pageMargins → pageSetup）
+  // 倍率を指定した場合は「ページに合わせる」を使わない（併用するとExcelが倍率を無視する）
+  var useFit = pg && !pg.scale;
+  if (useFit) {
+    xml += '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>';
+  }
+  if (sheet.freeze && (sheet.freeze.row || sheet.freeze.col)) {
+    var fr = sheet.freeze.row || 0, fc = sheet.freeze.col || 0;
+    var topLeft = xlsxColLetter(fc) + (fr + 1);
+    var act = fc > 0 ? (fr > 0 ? 'bottomRight' : 'topRight') : 'bottomLeft';
+    xml += '<sheetViews><sheetView workbookViewId="0">'
+        +  '<pane xSplit="'+fc+'" ySplit="'+fr+'" topLeftCell="'+topLeft+'"'
+        +  ' activePane="'+act+'" state="frozen"/>'
+        +  '<selection pane="'+act+'" activeCell="'+topLeft+'" sqref="'+topLeft+'"/>'
+        +  '</sheetView></sheetViews>';
+  }
   if (sheet.cols && sheet.cols.length) {
     xml += '<cols>';
     for (var i=0; i<sheet.cols.length; i++) xml += '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+sheet.cols[i]+'" customWidth="1"/>';
@@ -46,6 +73,31 @@ function xlsxSheetXml(sheet) {
     xml += '<mergeCells count="'+sheet.merges.length+'">';
     for (var i=0; i<sheet.merges.length; i++) xml += '<mergeCell ref="'+sheet.merges[i]+'"/>';
     xml += '</mergeCells>';
+  }
+  // 改ページ（列・行）。mergeCells の後、printOptions の前に置く
+  if (sheet.colBreaks && sheet.colBreaks.length) {
+    xml += '<colBreaks count="'+sheet.colBreaks.length+'" manualBreakCount="'+sheet.colBreaks.length+'">';
+    for (var i=0; i<sheet.colBreaks.length; i++) {
+      xml += '<brk id="'+sheet.colBreaks[i]+'" max="1048575" man="1"/>';
+    }
+    xml += '</colBreaks>';
+  }
+  if (pg) {
+    var paper = pg.paper || 9;                       // 9 = A4
+    var land  = (pg.landscape !== false);
+    xml += '<printOptions horizontalCentered="1"'
+        +  (pg.gridlines ? ' gridLines="1"' : '') + '/>';
+    xml += '<pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4"'
+        +  ' header="0.2" footer="0.2"/>';
+    xml += '<pageSetup paperSize="'+paper+'" orientation="'+(land?'landscape':'portrait')+'"';
+    if (pg.scale) {
+      xml += ' scale="'+pg.scale+'"';
+    } else {
+      var fw = (pg.fitToWidth  === undefined) ? 1 : pg.fitToWidth;
+      var fh = (pg.fitToHeight === undefined) ? 0 : pg.fitToHeight;
+      xml += ' fitToWidth="'+fw+'" fitToHeight="'+fh+'"';
+    }
+    xml += ' horizontalDpi="300" verticalDpi="300"/>';
   }
   xml += '</worksheet>';
   return xml;
@@ -145,7 +197,7 @@ function downloadXlsxBook(sheets, filename) {
     + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
     + '<Default Extension="xml" ContentType="application/xml"/>'
     + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
-  var sheetsXml = '', wbRels = '', files = [];
+  var sheetsXml = '', wbRels = '', files = [], sheetFinalNames = [];
   for (var i = 0; i < n; i++) {
     var idx = i + 1;
     // シート名はブック内で一意でなければならない
@@ -156,6 +208,7 @@ function downloadXlsxBook(sheets, filename) {
       nm = xlsxSanitizeName(nm.slice(0, 27) + '(' + suffix + ')');
     }
     usedNames[nm] = true;
+    sheetFinalNames.push(nm);
     ct += '<Override PartName="/xl/worksheets/sheet' + idx + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>';
     sheetsXml += '<sheet name="' + xmlEsc(nm) + '" sheetId="' + idx + '" r:id="rId' + idx + '"/>';
     wbRels += '<Relationship Id="rId' + idx + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + idx + '.xml"/>';
@@ -167,9 +220,29 @@ function downloadXlsxBook(sheets, filename) {
     + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
     + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
     + '</Relationships>';
+  // 印刷時に各ページの先頭で見出しを繰り返すための定義（Print_Titles）
+  var definedNames = '';
+  for (var i = 0; i < n; i++) {
+    var pgi = sheets[i].page;
+    if (!pgi || (!pgi.repeatRows && !pgi.repeatCols)) continue;
+    var refs = [];
+    var qn = "'" + sheetFinalNames[i].replace(/'/g, "''") + "'";
+    if (pgi.repeatCols) {
+      var cc = pgi.repeatCols.split(':');
+      refs.push(qn + '!$' + cc[0] + ':$' + (cc[1] || cc[0]));
+    }
+    if (pgi.repeatRows) {
+      var rr = pgi.repeatRows.split(':');
+      refs.push(qn + '!$' + rr[0] + ':$' + (rr[1] || rr[0]));
+    }
+    definedNames += '<definedName name="_xlnm.Print_Titles" localSheetId="' + i + '">'
+                 +  xmlEsc(refs.join(',')) + '</definedName>';
+  }
   var workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-    + '<sheets>' + sheetsXml + '</sheets></workbook>';
+    + '<sheets>' + sheetsXml + '</sheets>'
+    + (definedNames ? '<definedNames>' + definedNames + '</definedNames>' : '')
+    + '</workbook>';
   var workbookRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
     + wbRels + '</Relationships>';
