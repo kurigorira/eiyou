@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-10-10a';
+var APP_VERSION = '2026-10-20a';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
@@ -2196,6 +2196,13 @@ function exportDetailExcel() {
   sheet.merges.push('A'+sumRow2+':C'+sumRow2);
   var totC = 3 + days*NC;
   sheet.merges.push(xlsxColLetter(totC)+sumRow2+':'+xlsxColLetter(totC+NC-1)+sumRow2);
+
+  // 出力日時とシステムの版を記録する。
+  // Excelだけを見てどの版で出したものか分かるようにしておく。
+  sheet.rows.push([]);
+  var stampRow = sheet.rows.length + 1;
+  sheet.rows.push([XC('出力: ' + fmtDate(new Date()) + '　システム版: ' + APP_VERSION, 4)]);
+  sheet.merges.push('A'+stampRow+':'+xlsxColLetter(Math.min(ncol-1, 10))+stampRow);
 
   // ===== A4で印刷しやすくする =====
   // 1日あたり7列あるため1ページには収まらない。無理に縮めると読めなくなるので、
