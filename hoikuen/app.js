@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-10-21b';
+var APP_VERSION = '2026-10-21c';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -182,6 +182,48 @@ function categoryLabel(key) {
   return CHILD_CATEGORIES[0].label; // 未設定は在園児として扱う
 }
 function childCategory(c) { return (c && c.category) ? c.category : 'zaien'; }
+
+// ==================== 子供の年齢 ====================
+// 基準日は「その月の1日」。月の途中で誕生日が来ても帳票内で表示が揺れないようにする。
+// 戻り値: {years, months, totalMonths} ／ 生年月日が無い場合は null
+function childAge(c, y, m) {
+  if (!c || !c.birth) return null;
+  var p = String(c.birth).split('-');
+  if (p.length < 3) return null;
+  var by = parseInt(p[0],10), bm = parseInt(p[1],10), bd = parseInt(p[2],10);
+  if (!by || !bm || !bd) return null;
+  var total = (y - by) * 12 + (m - bm);
+  if (bd > 1) total -= 1;          // その月の1日時点でまだ誕生日が来ていない
+  if (total < 0) total = 0;
+  return {years: Math.floor(total/12), months: total%12, totalMonths: total};
+}
+// 「2歳3か月」の形で返す。生年月日が無ければ空文字
+function childAgeText(c, y, m) {
+  var a = childAge(c, y, m);
+  if (!a) return '';
+  return a.years + '歳' + a.months + 'か月';
+}
+// 年齢順（低い順）に並べる。生年月日が無い子は最後にまわす
+function sortChildrenByAge(list, y, m) {
+  return list.slice().sort(function(a, b) {
+    var aa = childAge(a, y, m), ab = childAge(b, y, m);
+    if (aa && ab) {
+      if (aa.totalMonths !== ab.totalMonths) return aa.totalMonths - ab.totalMonths;
+    } else if (aa) { return -1; }
+    else if (ab) { return 1; }
+    return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+  });
+}
+
+// 職員IDを数値として比較する（"98885" < "122182" のように桁数が違っても正しく並ぶ）
+function compareStaffId(a, b) {
+  var na = parseInt(String(a).replace(/[^0-9]/g, ''), 10);
+  var nb = parseInt(String(b).replace(/[^0-9]/g, ''), 10);
+  var va = isNaN(na), vb = isNaN(nb);
+  if (!va && !vb && na !== nb) return na - nb;
+  if (va !== vb) return va ? 1 : -1;   // 数字でないIDは後ろへ
+  return String(a) < String(b) ? -1 : (String(a) > String(b) ? 1 : 0);
+}
 
 function getMealPrice(category, mealKey) {
   var row = prices[category || 'zaien'];
@@ -405,10 +447,8 @@ function getHoikuDeptStaff() {
   for (var sid in picked) {
     list.push(byId[sid] || {id: sid, name: '', dept: ''});
   }
-  list.sort(function(a, b) {
-    var na = a.name || a.id, nb = b.name || b.id;
-    return na < nb ? -1 : (na > nb ? 1 : 0);
-  });
+  // 職員IDの若い順に並べる
+  list.sort(function(a, b) { return compareStaffId(a.id, b.id); });
   return list;
 }
 
@@ -1619,7 +1659,14 @@ function renderChildList() {
   for (var i=0; i<sorted.length; i++) {
     var c = sorted[i];
     var st = getStaffById(c.staffId);
+    var now = new Date();
+    var ageTxt = childAgeText(c, now.getFullYear(), now.getMonth()+1);
     html += '<tr><td>'+esc(c.name)+'</td>';
+    html += '<td><input type="date" class="child-birth" data-id="'+esc(c.id)+'"'
+         +  ' value="'+esc(c.birth||'')+'" style="font-size:0.8rem"></td>';
+    html += '<td style="white-space:nowrap">'
+         +  (ageTxt ? esc(ageTxt) : '<span style="color:#dc3545;font-size:0.78rem">生年月日なし</span>')
+         +  '</td>';
     html += '<td>'+esc(st ? st.name+'('+c.staffId+')' : c.staffId)+'</td>';
     html += '<td><select class="child-cat" data-id="'+esc(c.id)+'">';
     for (var k=0; k<CHILD_CATEGORIES.length; k++) {
@@ -1629,8 +1676,18 @@ function renderChildList() {
     html += '</select></td>';
     html += '<td><button class="btn-del" data-del="'+esc(c.id)+'">削除</button></td></tr>';
   }
-  if (!html) html = '<tr><td colspan="4" style="text-align:center;color:#999">子供の登録なし</td></tr>';
+  if (!html) html = '<tr><td colspan="6" style="text-align:center;color:#999">子供の登録なし</td></tr>';
   tb.innerHTML = html;
+  var births = tb.querySelectorAll('input.child-birth');
+  for (var i=0; i<births.length; i++) {
+    births[i].addEventListener('change', function() {
+      var cid = this.getAttribute('data-id'), v = this.value;
+      for (var j=0; j<children.length; j++) if (children[j].id === cid) children[j].birth = v;
+      apiSave('children', children);
+      renderChildList();
+      showToast(v ? '生年月日を ' + v + ' にしました' : '生年月日を消しました');
+    });
+  }
   var sels = tb.querySelectorAll('select.child-cat');
   for (var i=0; i<sels.length; i++) {
     sels[i].addEventListener('change', function() {
@@ -1656,10 +1713,12 @@ function submitChild(e) {
     id: 'C' + Date.now(),
     staffId: staffId,
     name: name,
+    birth: (document.getElementById('cf-birth').value || '').trim(),
     category: document.getElementById('cf-category').value || 'zaien'
   });
   apiSave('children', children);
   document.getElementById('cf-name').value = '';
+  document.getElementById('cf-birth').value = '';
   renderChildList();
   showToast(name + 'を登録しました');
 }
@@ -2405,8 +2464,9 @@ function exportHoikuFormExcel() {
 }
 
 // 各シートの一番下に、部署「保育園」の職員の勤務表を差し込む。
-// 日付の列は上の表と揃えるため、先頭2列（氏名・職員ID）にしている。
-// 職員マスタに無い方は「保育士管理」で個別登録した分を続けて出す。
+// 日付の列は上の表と揃えるため、先頭3列（職員ID・氏名・職種）にしている。
+// 並び順は職員IDの若い順。職員マスタに無い方は「保育園職員」タブで
+// 個別登録した分を続けて出す。
 function appendShiftBlock(sheet, y, m, days) {
   var deptName = getHoikuDeptName();
   var list = getHoikuDeptStaff();
@@ -2416,11 +2476,11 @@ function appendShiftBlock(sheet, y, m, days) {
   sheet.rows.push([]);
   var tr = sheet.rows.length + 1;
   var title = [XC(y+'年'+m+'月　'+label+'　勤務表', 3)];
-  for (var c=1; c<2+days; c++) title.push(XC('',3));
+  for (var c=1; c<3+days; c++) title.push(XC('',3));
   sheet.rows.push(title);
-  sheet.merges.push('A'+tr+':'+xlsxColLetter(1+days)+tr);
+  sheet.merges.push('A'+tr+':'+xlsxColLetter(2+days)+tr);
 
-  var hdr = [XC('氏名',1), XC('職員ID',1)];
+  var hdr = [XC('職員ID',1), XC('氏名',1), XC('職種',1)];
   for (var d=1; d<=days; d++) hdr.push(XC(d, dayFillStyle(y,m,d,true)));
   sheet.rows.push(hdr);
 
@@ -2429,10 +2489,10 @@ function appendShiftBlock(sheet, y, m, days) {
     return;
   }
   var anyShift = false;
-  // ① 職員マスタの部署「保育園」（勤務は勤務管理DBから取り込んだもの）
+  // ① 職員マスタの保育園職員（勤務は勤務管理DBから取り込んだもの）。職員IDの若い順
   for (var i=0; i<list.length; i++) {
     var s = list[i];
-    var row = [XC(s.name || s.id, 4), XC(s.id, 4)];
+    var row = [XC(s.id, 4), XC(s.name || '', 4), XC('', 4)];
     for (var d=1; d<=days; d++) {
       var v = getShift(s.id, y, m, d);
       if (v) anyShift = true;
@@ -2440,10 +2500,10 @@ function appendShiftBlock(sheet, y, m, days) {
     }
     sheet.rows.push(row);
   }
-  // ② 「保育士管理」で個別に登録した方（職員マスタに無い場合の補助）
+  // ② 「保育園職員」タブで個別に登録した方（職員マスタに無い場合の補助）
   for (var i=0; i<extra.length; i++) {
     var e = extra[i];
-    var row2 = [XC(e.name, 4), XC(e.role || '', 4)];
+    var row2 = [XC('', 4), XC(e.name, 4), XC(e.role || '', 4)];
     for (var d=1; d<=days; d++) {
       var v2 = getHoikuShift(e.id, y, m, d);
       if (v2) anyShift = true;
@@ -2472,9 +2532,9 @@ function formDayHeader(sheet, y, m, days, startCol) {
 function buildAttendanceSheet(y, m) {
   var days = daysInMonth(y, m);
   var sheet = {name:'出欠確認', rows:[], merges:[], cols:[]};
-  sheet.cols = [12, 16];
+  sheet.cols = [12, 16, 10];
   for (var d=0; d<days; d++) sheet.cols.push(5);
-  var ncol = 2 + days;
+  var ncol = 3 + days;
   var lastCol = xlsxColLetter(ncol - 1);
 
   var tr = sheet.rows.length + 1;
@@ -2482,26 +2542,31 @@ function buildAttendanceSheet(y, m) {
   for (var c=1; c<ncol; c++) t.push(XC('',3));
   sheet.rows.push(t);
   sheet.merges.push('A'+tr+':'+lastCol+tr);
-  sheet.rows.push([XC('区分',1), XC('氏名',1)]);
-  // 上で作った見出し行に「区分/氏名」を載せるため、日付2行の先頭を補う
+  sheet.rows.push([XC('区分',1), XC('氏名',1), XC('年齢',1)]);
+  // 上で作った見出し行に「区分/氏名/年齢」を載せるため、日付2行の先頭を補う
   var hdrStart = sheet.rows.length;
-  formDayHeader(sheet, y, m, days, 2);
+  formDayHeader(sheet, y, m, days, 3);
   sheet.rows[hdrStart][0] = XC('区分',1);
   sheet.rows[hdrStart][1] = XC('氏名',1);
+  sheet.rows[hdrStart][2] = XC('年齢',1);
   sheet.rows[hdrStart+1][0] = XC('',1);
   sheet.rows[hdrStart+1][1] = XC('',1);
+  sheet.rows[hdrStart+1][2] = XC('',1);
   sheet.rows.splice(hdrStart-1, 1); // 仮に入れた行を除去
   sheet.merges.push('A'+(hdrStart)+':A'+(hdrStart+1));
   sheet.merges.push('B'+(hdrStart)+':B'+(hdrStart+1));
+  sheet.merges.push('C'+(hdrStart)+':C'+(hdrStart+1));
 
   for (var ci=0; ci<CHILD_CATEGORIES.length; ci++) {
     var cat = CHILD_CATEGORIES[ci];
-    var kids = children.filter(function(c) { return childCategory(c) === cat.key; });
+    var kids = sortChildrenByAge(
+      children.filter(function(c) { return childCategory(c) === cat.key; }), y, m);
     if (kids.length === 0) continue;
     var blockStart = sheet.rows.length + 1;
     for (var j=0; j<kids.length; j++) {
       var kid = kids[j];
-      var row = [XC(j===0 ? cat.label : '', 3), XC(kid.name, 4)];
+      var row = [XC(j===0 ? cat.label : '', 3), XC(kid.name, 4),
+                 XC(childAgeText(kid, y, m), 2)];
       for (var d=1; d<=days; d++) {
         var sh = getShift(kid.staffId, y, m, d);
         var o  = getCountedOrder(kid.id, y, m, d);
@@ -2524,10 +2589,10 @@ function buildOrderFormSheet(y, m, cat) {
   var days = daysInMonth(y, m);
   var NM = MEAL_KEYS.length;
   var sheet = {name:'食事注文表('+cat.label+')', rows:[], merges:[], cols:[]};
-  sheet.cols = [16, 12];
+  sheet.cols = [16, 10, 12];
   for (var d=0; d<days; d++) sheet.cols.push(5);
   sheet.cols.push(7);
-  var ncol = 2 + days + 1;
+  var ncol = 3 + days + 1;
   var lastCol = xlsxColLetter(ncol - 1);
 
   var tr = sheet.rows.length + 1;
@@ -2537,25 +2602,30 @@ function buildOrderFormSheet(y, m, cat) {
   sheet.merges.push('A'+tr+':'+lastCol+tr);
 
   var hdrStart = sheet.rows.length + 1;
-  formDayHeader(sheet, y, m, days, 2);
+  formDayHeader(sheet, y, m, days, 3);
   var i0 = sheet.rows.length - 2, i1 = sheet.rows.length - 1;
-  sheet.rows[i0][0] = XC('氏名',1);  sheet.rows[i0][1] = XC('食事',1);
-  sheet.rows[i1][0] = XC('',1);      sheet.rows[i1][1] = XC('',1);
+  sheet.rows[i0][0] = XC('氏名',1);  sheet.rows[i0][1] = XC('年齢',1);  sheet.rows[i0][2] = XC('食事',1);
+  sheet.rows[i1][0] = XC('',1);      sheet.rows[i1][1] = XC('',1);      sheet.rows[i1][2] = XC('',1);
   sheet.rows[i0].push(XC('計',1));   sheet.rows[i1].push(XC('',1));
   sheet.merges.push('A'+hdrStart+':A'+(hdrStart+1));
   sheet.merges.push('B'+hdrStart+':B'+(hdrStart+1));
+  sheet.merges.push('C'+hdrStart+':C'+(hdrStart+1));
   sheet.merges.push(lastCol+hdrStart+':'+lastCol+(hdrStart+1));
 
-  var kids = children.filter(function(c) { return childCategory(c) === cat.key; });
+  var kids = sortChildrenByAge(
+    children.filter(function(c) { return childCategory(c) === cat.key; }), y, m);
   var grand = {}; for (var k=0; k<NM; k++) grand[MEAL_KEYS[k]] = [];
   for (var k=0; k<NM; k++) for (var d=0; d<days; d++) grand[MEAL_KEYS[k]].push(0);
 
   for (var j=0; j<kids.length; j++) {
     var kid = kids[j];
     var blockStart = sheet.rows.length + 1;
+    var ageTxt = childAgeText(kid, y, m);
     for (var k=0; k<NM; k++) {
       var mk = MEAL_KEYS[k];
-      var row = [XC(k===0 ? kid.name : '', 4), XC(MEAL_NAMES[mk], 2)];
+      var row = [XC(k===0 ? kid.name : '', 4),
+                 XC(k===0 ? ageTxt : '', 2),
+                 XC(MEAL_NAMES[mk], 2)];
       var cnt = 0;
       for (var d=1; d<=days; d++) {
         var o = getCountedOrder(kid.id, y, m, d);
@@ -2567,6 +2637,7 @@ function buildOrderFormSheet(y, m, cat) {
       sheet.rows.push(row);
     }
     sheet.merges.push('A'+blockStart+':A'+(sheet.rows.length));
+    sheet.merges.push('B'+blockStart+':B'+(sheet.rows.length));
   }
   if (kids.length === 0) {
     sheet.rows.push([XC('該当する子供が登録されていません', 4)]);
@@ -2579,13 +2650,13 @@ function buildOrderFormSheet(y, m, cat) {
   var sumStart = sheet.rows.length + 1;
   for (var k=0; k<NM; k++) {
     var mk = MEAL_KEYS[k];
-    var row = [XC(k===0 ? '合計食数' : '', 3), XC(MEAL_NAMES[mk], 3)];
+    var row = [XC(k===0 ? '合計食数' : '', 3), XC('', 3), XC(MEAL_NAMES[mk], 3)];
     var tot = 0;
     for (var d=0; d<days; d++) { tot += grand[mk][d]; row.push(XC(grand[mk][d], 3)); }
     row.push(XC(tot, 3));
     sheet.rows.push(row);
   }
-  sheet.merges.push('A'+sumStart+':A'+(sheet.rows.length));
+  sheet.merges.push('A'+sumStart+':B'+(sheet.rows.length));
   appendShiftBlock(sheet, y, m, days);
   return sheet;
 }
@@ -3020,7 +3091,7 @@ function buildHoikuStaffShiftSection(y, m) {
   html += '<p class="help-text">食事注文表Excelの各シートの一番下に、この内容が出ます。'
        +  (byMembers ? '（「保育園職員」タブで選んだ ' + hoikuMembers.length + '名）'
                      : '（部署「' + esc(deptName) + '」の職員）') + '</p>';
-  html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>氏名</th><th>職員ID</th>';
+  html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
     var bg = getHolidayName(y+'-'+pad(m)+'-'+pad(d)) ? 'background:#fff8e1;'
@@ -3031,8 +3102,8 @@ function buildHoikuStaffShiftSection(y, m) {
   var anyShift = false;
   for (var i=0; i<list.length; i++) {
     var s = list[i];
-    html += '<tr><td style="white-space:nowrap">'+esc(s.name || s.id)+'</td>'
-         +  '<td style="font-size:0.75rem">'+esc(s.id)+'</td>';
+    html += '<tr><td style="font-size:0.8rem">'+esc(s.id)+'</td>'
+         +  '<td style="white-space:nowrap">'+esc(s.name || s.id)+'</td>';
     for (var d=1; d<=days; d++) {
       var v = getShift(s.id, y, m, d);
       if (v) anyShift = true;
@@ -3042,8 +3113,8 @@ function buildHoikuStaffShiftSection(y, m) {
   }
   for (var i=0; i<extra.length; i++) {
     var e = extra[i];
-    html += '<tr><td style="white-space:nowrap">'+esc(e.name)+'</td>'
-         +  '<td style="font-size:0.75rem">'+esc(e.role||'')+'</td>';
+    html += '<tr><td style="font-size:0.8rem;color:#999">-</td>'
+         +  '<td style="white-space:nowrap">'+esc(e.name)+(e.role?'<br><span style="font-size:0.7rem;color:#888">'+esc(e.role)+'</span>':'')+'</td>';
     for (var d=1; d<=days; d++) {
       var v2 = getHoikuShift(e.id, y, m, d);
       if (v2) anyShift = true;

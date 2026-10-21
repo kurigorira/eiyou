@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20261021b">
+<link rel="stylesheet" href="style.css?v=20261021c">
 </head>
 <body>
 <div id="app">
@@ -162,6 +162,9 @@
             <select id="child-staff"><option value="">-- 選択 --</option></select>
           </label>
           <input type="text" id="cf-name" placeholder="子供の名前" required>
+          <label>生年月日:
+            <input type="date" id="cf-birth" style="width:150px">
+          </label>
           <label>区分:
             <select id="cf-category">
               <option value="zaien">在園児</option>
@@ -171,9 +174,11 @@
           </label>
           <button type="submit" class="btn">追加</button>
         </form>
-        <p class="help-text">区分は食事料金の計算と帳票の分類に使われます。</p>
+        <p class="help-text">区分は食事料金の計算と帳票の分類に使われます。<br>
+          <strong>生年月日</strong>を入れると、食事注文表Excelに年齢・月齢が出力され、年齢順に並びます。
+          後からこの一覧で入力・修正もできます。</p>
         <table class="data-table" style="margin-top:10px">
-          <thead><tr><th>子供名</th><th>保護者</th><th>区分</th><th>操作</th></tr></thead>
+          <thead><tr><th>子供名</th><th>生年月日</th><th>年齢</th><th>保護者</th><th>区分</th><th>操作</th></tr></thead>
           <tbody id="child-list"></tbody>
         </table>
       </div>
@@ -371,7 +376,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20261021b"></script>
-<script src="app.js?v=20261021b"></script>
+<script src="../xlsx.js?v=20261021c"></script>
+<script src="app.js?v=20261021c"></script>
 </body>
 </html>
