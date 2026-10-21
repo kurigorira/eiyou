@@ -36,8 +36,9 @@ function xlsxSheetXml(sheet) {
   var pg = sheet.page || null;
   var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
   xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
-  // ※ worksheet の子要素は順番が決まっている（sheetPr → sheetViews → cols →
-  //    sheetData → mergeCells → printOptions → pageMargins → pageSetup）
+  // ※ worksheet の子要素は順番が決まっており、違うとExcelが開けない（修復される）。
+  //    sheetPr → sheetViews → cols → sheetData → mergeCells →
+  //    printOptions → pageMargins → pageSetup → rowBreaks → colBreaks
   // 倍率を指定した場合は「ページに合わせる」を使わない（併用するとExcelが倍率を無視する）
   var useFit = pg && !pg.scale;
   if (useFit) {
@@ -74,14 +75,6 @@ function xlsxSheetXml(sheet) {
     for (var i=0; i<sheet.merges.length; i++) xml += '<mergeCell ref="'+sheet.merges[i]+'"/>';
     xml += '</mergeCells>';
   }
-  // 改ページ（列・行）。mergeCells の後、printOptions の前に置く
-  if (sheet.colBreaks && sheet.colBreaks.length) {
-    xml += '<colBreaks count="'+sheet.colBreaks.length+'" manualBreakCount="'+sheet.colBreaks.length+'">';
-    for (var i=0; i<sheet.colBreaks.length; i++) {
-      xml += '<brk id="'+sheet.colBreaks[i]+'" max="1048575" man="1"/>';
-    }
-    xml += '</colBreaks>';
-  }
   if (pg) {
     var paper = pg.paper || 9;                       // 9 = A4
     var land  = (pg.landscape !== false);
@@ -98,6 +91,15 @@ function xlsxSheetXml(sheet) {
       xml += ' fitToWidth="'+fw+'" fitToHeight="'+fh+'"';
     }
     xml += ' horizontalDpi="300" verticalDpi="300"/>';
+  }
+  // 改ページ（列）。OOXMLの仕様では pageSetup / headerFooter より後ろに置く決まり。
+  // 順序を間違えるとExcelが「XMLエラー」としてファイルを修復してしまう。
+  if (sheet.colBreaks && sheet.colBreaks.length) {
+    xml += '<colBreaks count="'+sheet.colBreaks.length+'" manualBreakCount="'+sheet.colBreaks.length+'">';
+    for (var i=0; i<sheet.colBreaks.length; i++) {
+      xml += '<brk id="'+sheet.colBreaks[i]+'" max="1048575" man="1"/>';
+    }
+    xml += '</colBreaks>';
   }
   xml += '</worksheet>';
   return xml;
