@@ -401,6 +401,25 @@ input[type="text"], input[type="date"], select {
   padding: 2px 3px;
 }
 
+/* 全注文者一覧の縦の合計行（日計・その日の合計） */
+.rpt-detail-table tfoot .rpt-sum-row th,
+.rpt-detail-table tfoot .rpt-sum-row td {
+  font-weight: bold;
+  background: #eef3fa;
+  border-top: 2px solid var(--primary);
+}
+.rpt-detail-table tfoot .rpt-sum-row th { text-align: center; white-space: nowrap; }
+.rpt-detail-table tfoot .rpt-sum-row-strong th,
+.rpt-detail-table tfoot .rpt-sum-row-strong td {
+  background: #dde8f5;
+  border-top: 1px solid var(--primary);
+  font-size: 0.75rem;
+}
+/* 合計行は横スクロールしても下に貼り付けておく */
+.rpt-detail-table tfoot .rpt-sum-row th:first-child {
+  position: sticky; left: 0; z-index: 2;
+}
+
 .kensa-sel {
   max-width: 170px;
   font-size: 0.82rem;

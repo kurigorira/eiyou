@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-10-20a';
+var APP_VERSION = '2026-10-21a';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
@@ -2014,6 +2014,12 @@ function runDetailReport() {
   }
   for (var c=0; c<NC; c++) html += '<th style="font-size:0.65rem;padding:2px;">'+DETAIL_COLS[c].label+'</th>';
   html += '</tr></thead><tbody>';
+  // 明細を描きながら、日ごと・区分ごとの縦の合計を数える
+  var dayTot = [];
+  for (var d=0; d<days; d++) { var t=[]; for (var c=0; c<NC; c++) t.push(0); dayTot.push(t); }
+  var colTot = []; for (var c=0; c<NC; c++) colTot.push(0);
+  var grandTot = 0;
+
   for (var i=0; i<rows.length; i++) {
     var sw = rows[i], s = sw.staff;
     html += '<tr>';
@@ -2023,16 +2029,40 @@ function runDetailReport() {
     for (var d=1; d<=days; d++) {
       var cell = sw.perDay[d-1], bg = dayBg(d);
       for (var c=0; c<NC; c++) {
-        html += '<td style="text-align:center;padding:2px;'+bg+'">'+(cell[DETAIL_COLS[c].k]?'○':'')+'</td>';
+        var on = !!cell[DETAIL_COLS[c].k];
+        if (on) dayTot[d-1][c]++;
+        html += '<td style="text-align:center;padding:2px;'+bg+'">'+(on?'○':'')+'</td>';
       }
     }
     for (var c=0; c<NC; c++) {
       html += '<td style="text-align:center;font-weight:bold">'+sw.totals[DETAIL_COLS[c].k]+'</td>';
+      colTot[c] += sw.totals[DETAIL_COLS[c].k];
     }
     html += '<td style="text-align:center;font-weight:bold">'+sw.totals.all+'</td>';
+    grandTot += sw.totals.all;
     html += '</tr>';
   }
-  html += '</tbody></table></div></div>';
+  html += '</tbody><tfoot>';
+  // ① 日計（区分ごと）
+  html += '<tr class="rpt-sum-row"><th colspan="3">日計</th>';
+  for (var d=1; d<=days; d++) {
+    var bg2 = dayBg(d);
+    for (var c=0; c<NC; c++) {
+      html += '<td style="text-align:center;padding:2px;'+bg2+'">'+dayTot[d-1][c]+'</td>';
+    }
+  }
+  for (var c=0; c<NC; c++) html += '<td style="text-align:center">'+colTot[c]+'</td>';
+  html += '<td style="text-align:center">'+grandTot+'</td></tr>';
+  // ② その日の合計（区分をまとめた1日あたりの食数）
+  html += '<tr class="rpt-sum-row rpt-sum-row-strong"><th colspan="3">その日の合計</th>';
+  for (var d=1; d<=days; d++) {
+    var dayAll = 0;
+    for (var c=0; c<NC; c++) dayAll += dayTot[d-1][c];
+    html += '<td colspan="'+NC+'" style="text-align:center;'+dayBg(d)+'">'+dayAll+'</td>';
+  }
+  html += '<td colspan="'+NC+'" style="text-align:center">'+grandTot+'</td>';
+  html += '<td style="text-align:center">'+grandTot+'</td></tr>';
+  html += '</tfoot></table></div></div>';
   document.getElementById('rpt-result').innerHTML = html;
 }
 
