@@ -54,6 +54,10 @@ function xlsxSheetXml(sheet) {
         +  '<selection pane="'+act+'" activeCell="'+topLeft+'" sqref="'+topLeft+'"/>'
         +  '</sheetView></sheetViews>';
   }
+  // 既定の行の高さ（セルを大きく見せる）。cols より前に置く決まり
+  if (sheet.defaultRowHeight) {
+    xml += '<sheetFormatPr defaultRowHeight="'+sheet.defaultRowHeight+'" customHeight="1"/>';
+  }
   if (sheet.cols && sheet.cols.length) {
     xml += '<cols>';
     for (var i=0; i<sheet.cols.length; i++) xml += '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+sheet.cols[i]+'" customWidth="1"/>';
@@ -62,7 +66,9 @@ function xlsxSheetXml(sheet) {
   xml += '<sheetData>';
   for (var r=0; r<sheet.rows.length; r++) {
     var row = sheet.rows[r];
-    xml += '<row r="'+(r+1)+'">';
+    xml += '<row r="'+(r+1)+'"'
+        +  (sheet.defaultRowHeight ? ' ht="'+sheet.defaultRowHeight+'" customHeight="1"' : '')
+        +  '>';
     for (var c=0; c<row.length; c++) {
       if (row[c] === null || row[c] === undefined) continue;
       xml += xlsxCellXml(r+1, c, row[c]);
@@ -107,9 +113,13 @@ function xlsxSheetXml(sheet) {
 function xlsxStylesXml() {
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
   + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-  + '<fonts count="3">'
+  + '<fonts count="5">'
   + '<font><sz val="11"/><name val="ＭＳ Ｐゴシック"/></font>'
   + '<font><b/><sz val="11"/><name val="ＭＳ Ｐゴシック"/></font>'
+  + '<font><b/><sz val="14"/><name val="ＭＳ Ｐゴシック"/></font>'
+  // 以下は印刷用の大きめフォント。列幅の単位は先頭のフォント(11pt)で決まるため、
+  // 先頭は変えずに別のフォントを足している。
+  + '<font><sz val="14"/><name val="ＭＳ Ｐゴシック"/></font>'
   + '<font><b/><sz val="14"/><name val="ＭＳ Ｐゴシック"/></font>'
   + '</fonts>'
   + '<fills count="6">'
@@ -125,7 +135,7 @@ function xlsxStylesXml() {
   + '<border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border>'
   + '</borders>'
   + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-  + '<cellXfs count="13">'
+  + '<cellXfs count="23">'
   + '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
   + '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
   + '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
@@ -139,6 +149,18 @@ function xlsxStylesXml() {
   + '<xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
   + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>'
   + '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>'
+  // ===== 13〜22: 印刷用の大きめ書式（1〜10 と同じ並び） =====
+  // データ側は shrinkToFit を付け、「リフ休」のような長い文字だけ自動で縮める
+  + '<xf numFmtId="0" fontId="4" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="3" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="4" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
+  + '<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" shrinkToFit="1"/></xf>'
   + '</cellXfs>'
   + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
   + '</styleSheet>';
@@ -272,4 +294,13 @@ function dayFillStyle(y, m, d, isHeader) {
     if (hol) return 10; if (dow===0) return 9; if (dow===6) return 8; return 1;
   }
   if (hol) return 7; if (dow===0) return 6; if (dow===6) return 5; return 2;
+}
+
+// 印刷用の大きめ書式に読み替える（13〜22 は 1〜10 と同じ並び）
+function LG(style) {
+  return (style >= 1 && style <= 10) ? style + 12 : style;
+}
+// 日ごとの塗り分け（大きめ書式）
+function dayFillStyleLg(y, m, d, isHeader) {
+  return LG(dayFillStyle(y, m, d, isHeader));
 }
