@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-10-24a';
+var APP_VERSION = '2026-10-24b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -2541,7 +2541,6 @@ function buildAttendanceSheet(y, m) {
   // A4横1ページに収めるため、日付の列は必要最小限の幅にする
   sheet.cols = [7, 11, 8];
   for (var d=0; d<days; d++) sheet.cols.push(4.2);
-  sheet.defaultRowHeight = 30;
   var ncol = 3 + days;
   var lastCol = xlsxColLetter(ncol - 1);
 
@@ -2591,10 +2590,7 @@ function buildAttendanceSheet(y, m) {
   }
   appendShiftBlock(sheet, y, m, days);
   // A4横・1ページ幅に収める。見出しの3行と氏名欄は各ページで繰り返す
-  sheet.page = {
-    paper: 9, landscape: true, fitToWidth: 1, fitToHeight: 0,
-    repeatRows: '2:3', repeatCols: 'A:C'
-  };
+  setFormSheetPage(sheet);
   return sheet;
 }
 
@@ -2607,7 +2603,6 @@ function buildOrderFormSheet(y, m, cat) {
   sheet.cols = [11, 8, 9];
   for (var d=0; d<days; d++) sheet.cols.push(4.2);
   sheet.cols.push(5);
-  sheet.defaultRowHeight = 30;
   var ncol = 3 + days + 1;
   var lastCol = xlsxColLetter(ncol - 1);
 
@@ -2679,10 +2674,25 @@ function buildOrderFormSheet(y, m, cat) {
 
 // 食事注文表シートの印刷設定（A4横・1ページ幅）
 function setFormSheetPage(sheet) {
+  sheet.defaultRowHeight = fitRowHeight(sheet.rows.length);
   sheet.page = {
     paper: 9, landscape: true, fitToWidth: 1, fitToHeight: 0,
     repeatRows: '2:3', repeatCols: 'A:C'
   };
+}
+
+// 行数に応じてセルの高さを決める。
+// 横幅を1ページに収める倍率がかかるため、その分を見込んだ高さの持ち分が
+// FORM_HEIGHT_BUDGET。行数で割って、1ページの高さいっぱいまで縦に広げる。
+var FORM_HEIGHT_BUDGET = 760;
+var FORM_ROW_MAX = 64;   // これ以上は間延びするので止める
+var FORM_ROW_MIN = 18;   // これ以下は読みにくいので、はみ出しても縮めない
+function fitRowHeight(rowCount) {
+  if (!rowCount || rowCount < 1) return 30;
+  var h = Math.floor(FORM_HEIGHT_BUDGET / rowCount);
+  if (h > FORM_ROW_MAX) h = FORM_ROW_MAX;
+  if (h < FORM_ROW_MIN) h = FORM_ROW_MIN;
+  return h;
 }
 
 // ==================== 全期間Excel出力（月ごとにシート） ====================
