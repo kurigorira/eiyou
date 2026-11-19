@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-19a';
+var APP_VERSION = '2026-11-19b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -156,7 +156,7 @@ function getChildById(id) {
   return null;
 }
 function getChildrenByStaff(staffId) {
-  return children.filter(function(c) { return c.staffId === staffId; });
+  return sortChildrenByAgeNow(children.filter(function(c) { return c.staffId === staffId; }));
 }
 function getStaffWithChildren() {
   var ids = {};
@@ -203,16 +203,22 @@ function childAgeText(c, y, m) {
   if (!a) return '';
   return a.years + '歳' + a.months + 'か月';
 }
-// 年齢順（低い順）に並べる。生年月日が無い子は最後にまわす
+// 月齢の大きい順（年長が上）に並べる。生年月日が無い子は最後にまわす。
+// 画面・Excelとも、子供を並べるところはすべてこれを使う。
 function sortChildrenByAge(list, y, m) {
   return list.slice().sort(function(a, b) {
     var aa = childAge(a, y, m), ab = childAge(b, y, m);
     if (aa && ab) {
-      if (aa.totalMonths !== ab.totalMonths) return aa.totalMonths - ab.totalMonths;
+      if (aa.totalMonths !== ab.totalMonths) return ab.totalMonths - aa.totalMonths;
     } else if (aa) { return -1; }
     else if (ab) { return 1; }
     return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
   });
+}
+// 今月を基準に並べる（年月の指定がない画面用）
+function sortChildrenByAgeNow(list) {
+  var n = new Date();
+  return sortChildrenByAge(list, n.getFullYear(), n.getMonth()+1);
 }
 
 // 職員IDを数値として比較する（"98885" < "122182" のように桁数が違っても正しく並ぶ）
@@ -315,8 +321,10 @@ function childMonthCost(child, y, m) {
 // 職員別（保護者別）の月間食事代
 function staffMonthCostRows(y, m) {
   var byStaff = {};
-  for (var i=0; i<children.length; i++) {
-    var c = children[i];
+  // 職員の中での子供の並びも月齢の大きい順に揃える
+  var kidsSorted = sortChildrenByAge(children, y, m);
+  for (var i=0; i<kidsSorted.length; i++) {
+    var c = kidsSorted[i];
     var r = childMonthCost(c, y, m);
     if (r.total === 0) continue;
     if (!byStaff[c.staffId]) byStaff[c.staffId] = {staffId: c.staffId, kids: [], amount: 0, total: 0};
@@ -1095,8 +1103,9 @@ function renderTodayInner() {
   else { notice.style.display='none'; }
 
   var lists = {b:[],s1:[],l:[],s2:[],d:[]};
-  for (var i=0; i<children.length; i++) {
-    var c = children[i];
+  var todayKids = sortChildrenByAge(children, y, m);
+  for (var i=0; i<todayKids.length; i++) {
+    var c = todayKids[i];
     var o = getCountedOrder(c.id, y, m, d);
     var s = getStaffById(c.staffId);
     var pName = s ? s.name : c.staffId;
@@ -1653,9 +1662,8 @@ function populateChildStaff() {
 function renderChildList() {
   var tb = document.getElementById('child-list');
   if (!tb) return;
-  var sorted = children.slice().sort(function(a,b) {
-    if (a.staffId < b.staffId) return -1; if (a.staffId > b.staffId) return 1; return 0;
-  });
+  // 月齢の大きい順（年長が上）。他の画面・Excelと並びを揃える
+  var sorted = sortChildrenByAgeNow(children);
   var html = '';
   for (var i=0; i<sorted.length; i++) {
     var c = sorted[i];
@@ -3215,8 +3223,9 @@ function runReportInner() {
     }
     dailyData.push({day:d, dow:dayOfWeek(y,m,d), t:dayT});
   }
-  for (var i=0; i<children.length; i++) {
-    var c = children[i]; var s = getStaffById(c.staffId);
+  var rptKids = sortChildrenByAge(children, y, m);
+  for (var i=0; i<rptKids.length; i++) {
+    var c = rptKids[i]; var s = getStaffById(c.staffId);
     var ct = {b:0,s1:0,l:0,s2:0,d:0}; var cn = {b:0,s1:0,l:0,s2:0,d:0}; var ck = {b:0,s1:0,l:0,s2:0,d:0};
     for (var d=1; d<=days; d++) {
       var o = getCountedOrder(c.id, y, m, d);
