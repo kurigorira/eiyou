@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-10-24b';
+var APP_VERSION = '2026-11-19a';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1220,13 +1220,11 @@ function renderOrderGrid() {
     var o = getOrder(childId, y, m, d);
     var sh = getShift(staffId, y, m, d);
     html += '<tr class="'+cls+'"><td>'+d+'</td><td>'+WEEKDAYS[dow]+'</td>';
-    var sd = sh ? getShiftDef(sh) : null;
-    var applyBtn = (sd && !orderLocked)
-      ? ' <button class="btn-sm shift-apply" data-d="'+d+'" title="この勤務区分の食事を入れる">反映</button>' : '';
     // 勤務区分はその場で手入力できる（勤務DBから取り込めない場合の入力口）
+    // 「反映」は日ごとには置かず、表の最後に1つだけ置く
     var shSel = '<select class="shift-sel" data-d="'+d+'"'
               + (shiftEditAllowed() ? '' : ' disabled') + '>' + shiftOptionsHtml(sh) + '</select>';
-    html += '<td style="font-size:0.75rem;white-space:nowrap">'+shSel+applyBtn+'</td>';
+    html += '<td style="font-size:0.75rem;white-space:nowrap">'+shSel+'</td>';
     for (var k=0; k<MEAL_KEYS.length; k++) {
       var mk = MEAL_KEYS[k];
       var v = o[mk] || '';
@@ -1236,6 +1234,12 @@ function renderOrderGrid() {
     }
     html += '<td style="text-align:left;font-size:0.75rem;color:#999">'+(hName||'')+'</td></tr>';
   }
+  // 表の最後に「勤務区分から一括反映」を1つだけ置く
+  // 確定済みでも押せるようにしておく（押すと「修正ボタンを押してください」と案内する）
+  html += '<tr class="order-apply-row"><td colspan="3" style="text-align:right">'
+       +  '<button class="btn btn-outline" id="grid-apply-all">勤務区分から一括反映</button></td>'
+       +  '<td colspan="'+(MEAL_KEYS.length+1)+'" style="text-align:left;font-size:0.75rem;color:#888">'
+       +  'この月の勤務区分から食事をまとめて入れます</td></tr>';
   html += '</tbody></table>';
   wrap.innerHTML = html;
   summary.style.display = '';
@@ -1249,12 +1253,9 @@ function renderOrderGrid() {
   for (var i=0; i<cells.length; i++) {
     cells[i].addEventListener('click', createCellClickHandler());
   }
-  var applies = wrap.querySelectorAll('button.shift-apply');
-  for (var i=0; i<applies.length; i++) {
-    applies[i].addEventListener('click', function(ev) {
-      ev.preventDefault();
-      applyShiftToDay(parseInt(this.getAttribute('data-d'), 10));
-    });
+  var applyAll = document.getElementById('grid-apply-all');
+  if (applyAll) {
+    applyAll.addEventListener('click', function(ev) { ev.preventDefault(); applyShiftToMonth(); });
   }
   var sels = wrap.querySelectorAll('select.shift-sel');
   for (var i=0; i<sels.length; i++) {
@@ -2567,7 +2568,7 @@ function buildAttendanceSheet(y, m) {
   for (var ci=0; ci<CHILD_CATEGORIES.length; ci++) {
     var cat = CHILD_CATEGORIES[ci];
     var kids = sortChildrenByAge(
-      children.filter(function(c) { return childCategory(c) === cat.key; }), y, m);
+      childrenWithOrders(y, m, children.filter(function(c) { return childCategory(c) === cat.key; })), y, m);
     if (kids.length === 0) continue;
     var blockStart = sheet.rows.length + 1;
     for (var j=0; j<kids.length; j++) {
@@ -2624,7 +2625,7 @@ function buildOrderFormSheet(y, m, cat) {
   sheet.merges.push(lastCol+hdrStart+':'+lastCol+(hdrStart+1));
 
   var kids = sortChildrenByAge(
-    children.filter(function(c) { return childCategory(c) === cat.key; }), y, m);
+    childrenWithOrders(y, m, children.filter(function(c) { return childCategory(c) === cat.key; })), y, m);
   var grand = {}; for (var k=0; k<NM; k++) grand[MEAL_KEYS[k]] = [];
   for (var k=0; k<NM; k++) for (var d=0; d<days; d++) grand[MEAL_KEYS[k]].push(0);
 
@@ -2998,11 +2999,33 @@ function matchReportDept(staffId) {
 function reportStaffIds(y, m) {
   var ym = y + '-' + pad(m);
   var month = shifts[ym] || {};
+  // 子供が登録されている職員（保護者）だけを対象にする。
+  // 勤務管理DBからは全職員の勤務が取り込まれるため、絞らないと
+  // 保育園と関係のない職員まで並んでしまう。
+  var isParent = {};
+  for (var i=0; i<children.length; i++) if (children[i].staffId) isParent[children[i].staffId] = true;
   var idSet = {};
   var rows = staffMonthCostRows(y, m);
-  for (var i=0; i<rows.length; i++) idSet[rows[i].staffId] = true;
-  for (var sid in month) idSet[sid] = true;
+  for (var i=0; i<rows.length; i++) if (isParent[rows[i].staffId]) idSet[rows[i].staffId] = true;
+  for (var sid in month) if (isParent[sid]) idSet[sid] = true;
   return Object.keys(idSet).sort();
+}
+
+// その月に食事の注文がある子供だけを返す（確定済みのみ）。
+// 帳票に注文のない子供の空行が並ぶのを防ぐ。
+function childrenWithOrders(y, m, list) {
+  var src = list || children;
+  var days = daysInMonth(y, m);
+  var out = [];
+  for (var i=0; i<src.length; i++) {
+    var c = src[i], has = false;
+    for (var d=1; d<=days && !has; d++) {
+      var o = getCountedOrder(c.id, y, m, d);
+      for (var k=0; k<MEAL_KEYS.length; k++) if (o[MEAL_KEYS[k]]) { has = true; break; }
+    }
+    if (has) out.push(c);
+  }
+  return out;
 }
 
 // 部署の一覧を作る。部署マスタの順（部署コード順）に並べ、
