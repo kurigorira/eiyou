@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-24b';
+var APP_VERSION = '2026-11-24c';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -203,6 +203,26 @@ function childAgeText(c, y, m) {
   if (!a) return '';
   return a.years + '歳' + a.months + 'か月';
 }
+// その月の注文から、子供の食種を判定する。
+// 元の帳票の氏名の下にある［ ］欄にあたる。
+//   すべてきざみ食 → 「きざみ」
+//   一部がきざみ食 → 「一部きざみ」
+//   きざみ食なし   → 空欄（普通食）
+function childMealType(c, y, m) {
+  var days = daysInMonth(y, m);
+  var n = 0, k = 0;
+  for (var d=1; d<=days; d++) {
+    var o = getCountedOrder(c.id, y, m, d);
+    for (var i=0; i<MEAL_KEYS.length; i++) {
+      var v = o[MEAL_KEYS[i]];
+      if (v === 'kizami') k++;
+      else if (v) n++;
+    }
+  }
+  if (k === 0) return '';
+  return n === 0 ? 'きざみ' : '一部きざみ';
+}
+
 // 月齢の大きい順（年長が上）に並べる。生年月日が無い子は最後にまわす。
 // 画面・Excelとも、子供を並べるところはすべてこれを使う。
 function sortChildrenByAge(list, y, m) {
@@ -2478,7 +2498,7 @@ function exportHoikuFormExcel() {
 }
 
 // 「出欠確認」シートの一番下に、保育園の職員の勤務表を差し込む。
-// 日付の列は上の表と揃えるため、先頭は3列ぶん使い、氏名をB:Cに結合している。
+// 日付の列は上の表と揃えるため、先頭は4列ぶん使い、氏名をB:Dに結合している。
 // 並び順は職員IDの若い順。職員マスタに無い方は「保育園職員」タブで
 // 個別登録した分を続けて出す。
 function appendShiftBlock(sheet, y, m, days) {
@@ -2490,15 +2510,15 @@ function appendShiftBlock(sheet, y, m, days) {
   sheet.rows.push([]);
   var tr = sheet.rows.length + 1;
   var title = [XC(y+'年'+m+'月　'+label+'　勤務表', LG(3))];
-  for (var c=1; c<3+days; c++) title.push(XC('', LG(3)));
+  for (var c=1; c<4+days; c++) title.push(XC('', LG(3)));
   sheet.rows.push(title);
-  sheet.merges.push('A'+tr+':'+xlsxColLetter(2+days)+tr);
+  sheet.merges.push('A'+tr+':'+xlsxColLetter(3+days)+tr);
 
   var hdrRow = sheet.rows.length + 1;
-  var hdr = [XC('職員ID', LG(1)), XC('氏名', LG(1)), XC('', LG(1))];
+  var hdr = [XC('職員ID', LG(1)), XC('氏名', LG(1)), XC('', LG(1)), XC('', LG(1))];
   for (var d=1; d<=days; d++) hdr.push(XC(d, dayFillStyleLg(y,m,d,true)));
   sheet.rows.push(hdr);
-  sheet.merges.push('B'+hdrRow+':C'+hdrRow);
+  sheet.merges.push('B'+hdrRow+':D'+hdrRow);
 
   if (list.length === 0 && extra.length === 0) {
     sheet.rows.push([XC('保育園の職員が設定されていません（管理者モード →「保育園職員」タブで選んでください）', LG(4))]);
@@ -2509,27 +2529,27 @@ function appendShiftBlock(sheet, y, m, days) {
   for (var i=0; i<list.length; i++) {
     var s = list[i];
     var rn = sheet.rows.length + 1;
-    var row = [XC(s.id, LG(4)), XC(s.name || '', LG(4)), XC('', LG(4))];
+    var row = [XC(s.id, LG(4)), XC(s.name || '', LG(4)), XC('', LG(4)), XC('', LG(4))];
     for (var d=1; d<=days; d++) {
       var v = getShift(s.id, y, m, d);
       if (v) anyShift = true;
       row.push(XC(v, dayFillStyleLg(y,m,d,false)));
     }
     sheet.rows.push(row);
-    sheet.merges.push('B'+rn+':C'+rn);
+    sheet.merges.push('B'+rn+':D'+rn);
   }
   // ② 「保育園職員」タブで個別に登録した方（職員マスタに無い場合の補助）
   for (var i=0; i<extra.length; i++) {
     var e = extra[i];
     var rn2 = sheet.rows.length + 1;
-    var row2 = [XC('', LG(4)), XC(e.name, LG(4)), XC('', LG(4))];
+    var row2 = [XC('', LG(4)), XC(e.name, LG(4)), XC('', LG(4)), XC('', LG(4))];
     for (var d=1; d<=days; d++) {
       var v2 = getHoikuShift(e.id, y, m, d);
       if (v2) anyShift = true;
       row2.push(XC(v2, dayFillStyleLg(y,m,d,false)));
     }
     sheet.rows.push(row2);
-    sheet.merges.push('B'+rn2+':C'+rn2);
+    sheet.merges.push('B'+rn2+':D'+rn2);
   }
   if (!anyShift) {
     sheet.rows.push([XC(y+'年'+m+'月の勤務区分が取り込まれていません', LG(4))]);
@@ -2553,9 +2573,9 @@ function buildAttendanceSheet(y, m) {
   var days = daysInMonth(y, m);
   var sheet = {name:'出欠確認', rows:[], merges:[], cols:[]};
   // A4横1ページに収めるため、日付の列は必要最小限の幅にする
-  sheet.cols = [7, 11, 8];
+  sheet.cols = [7, 11, 7, 8];
   for (var d=0; d<days; d++) sheet.cols.push(4.2);
-  var ncol = 3 + days;
+  var ncol = 4 + days;
   var lastCol = xlsxColLetter(ncol - 1);
 
   var tr = sheet.rows.length + 1;
@@ -2563,20 +2583,20 @@ function buildAttendanceSheet(y, m) {
   for (var c=1; c<ncol; c++) t.push(XC('', LG(3)));
   sheet.rows.push(t);
   sheet.merges.push('A'+tr+':'+lastCol+tr);
-  sheet.rows.push([XC('区分', LG(1)), XC('氏名', LG(1)), XC('年齢', LG(1))]);
-  // 上で作った見出し行に「区分/氏名/年齢」を載せるため、日付2行の先頭を補う
+  sheet.rows.push([XC('区分', LG(1)), XC('氏名', LG(1)), XC('年齢', LG(1)), XC('食種', LG(1))]);
+  // 上で作った見出し行に「区分/氏名/年齢/食種」を載せるため、日付2行の先頭を補う
   var hdrStart = sheet.rows.length;
-  formDayHeader(sheet, y, m, days, 3);
+  formDayHeader(sheet, y, m, days, 4);
   sheet.rows[hdrStart][0] = XC('区分', LG(1));
   sheet.rows[hdrStart][1] = XC('氏名', LG(1));
   sheet.rows[hdrStart][2] = XC('年齢', LG(1));
-  sheet.rows[hdrStart+1][0] = XC('', LG(1));
-  sheet.rows[hdrStart+1][1] = XC('', LG(1));
-  sheet.rows[hdrStart+1][2] = XC('', LG(1));
+  sheet.rows[hdrStart][3] = XC('食種', LG(1));
+  for (var c=0; c<4; c++) sheet.rows[hdrStart+1][c] = XC('', LG(1));
   sheet.rows.splice(hdrStart-1, 1); // 仮に入れた行を除去
-  sheet.merges.push('A'+(hdrStart)+':A'+(hdrStart+1));
-  sheet.merges.push('B'+(hdrStart)+':B'+(hdrStart+1));
-  sheet.merges.push('C'+(hdrStart)+':C'+(hdrStart+1));
+  for (var c=0; c<4; c++) {
+    var cl = xlsxColLetter(c);
+    sheet.merges.push(cl+(hdrStart)+':'+cl+(hdrStart+1));
+  }
 
   for (var ci=0; ci<CHILD_CATEGORIES.length; ci++) {
     var cat = CHILD_CATEGORIES[ci];
@@ -2586,8 +2606,10 @@ function buildAttendanceSheet(y, m) {
     var blockStart = sheet.rows.length + 1;
     for (var j=0; j<kids.length; j++) {
       var kid = kids[j];
+      var mtype = childMealType(kid, y, m);
       var row = [XC(j===0 ? cat.label : '', LG(3)), XC(kid.name, LG(4)),
-                 XC(childAgeText(kid, y, m), LG(2))];
+                 XC(childAgeText(kid, y, m), LG(2)),
+                 XC(mtype ? '［'+mtype+'］' : '', LG(2))];
       for (var d=1; d<=days; d++) {
         var sh = getShift(kid.staffId, y, m, d);
         var o  = getCountedOrder(kid.id, y, m, d);
@@ -2618,10 +2640,10 @@ function buildOrderFormSheet(y, m, cat) {
   var NM = MEAL_KEYS.length;
   var sheet = {name:'食事注文表('+cat.label+')', rows:[], merges:[], cols:[]};
   // A4横1ページに収めるため、日付の列は必要最小限の幅にする
-  sheet.cols = [11, 8, 9];
+  sheet.cols = [11, 7, 7, 9];
   for (var d=0; d<days; d++) sheet.cols.push(4.2);
   sheet.cols.push(5);
-  var ncol = 3 + days + 1;
+  var ncol = 4 + days + 1;
   var lastCol = xlsxColLetter(ncol - 1);
 
   var tr = sheet.rows.length + 1;
@@ -2631,14 +2653,15 @@ function buildOrderFormSheet(y, m, cat) {
   sheet.merges.push('A'+tr+':'+lastCol+tr);
 
   var hdrStart = sheet.rows.length + 1;
-  formDayHeader(sheet, y, m, days, 3);
+  formDayHeader(sheet, y, m, days, 4);
   var i0 = sheet.rows.length - 2, i1 = sheet.rows.length - 1;
-  sheet.rows[i0][0] = XC('氏名', LG(1));  sheet.rows[i0][1] = XC('年齢', LG(1));  sheet.rows[i0][2] = XC('食事', LG(1));
-  sheet.rows[i1][0] = XC('', LG(1));      sheet.rows[i1][1] = XC('', LG(1));      sheet.rows[i1][2] = XC('', LG(1));
+  var hds = ['氏名', '年齢', '食種', '食事'];
+  for (var c=0; c<4; c++) { sheet.rows[i0][c] = XC(hds[c], LG(1)); sheet.rows[i1][c] = XC('', LG(1)); }
   sheet.rows[i0].push(XC('計', LG(1)));   sheet.rows[i1].push(XC('', LG(1)));
-  sheet.merges.push('A'+hdrStart+':A'+(hdrStart+1));
-  sheet.merges.push('B'+hdrStart+':B'+(hdrStart+1));
-  sheet.merges.push('C'+hdrStart+':C'+(hdrStart+1));
+  for (var c=0; c<4; c++) {
+    var cl = xlsxColLetter(c);
+    sheet.merges.push(cl+hdrStart+':'+cl+(hdrStart+1));
+  }
   sheet.merges.push(lastCol+hdrStart+':'+lastCol+(hdrStart+1));
 
   var kids = sortChildrenByAge(
@@ -2651,10 +2674,12 @@ function buildOrderFormSheet(y, m, cat) {
     var kid = kids[j];
     var blockStart = sheet.rows.length + 1;
     var ageTxt = childAgeText(kid, y, m);
+    var mtype = childMealType(kid, y, m);
     for (var k=0; k<NM; k++) {
       var mk = MEAL_KEYS[k];
       var row = [XC(k===0 ? kid.name : '', LG(4)),
                  XC(k===0 ? ageTxt : '', LG(2)),
+                 XC(k===0 && mtype ? '［'+mtype+'］' : '', LG(2)),
                  XC(MEAL_NAMES[mk], LG(2))];
       var cnt = 0;
       for (var d=1; d<=days; d++) {
@@ -2672,6 +2697,7 @@ function buildOrderFormSheet(y, m, cat) {
     }
     sheet.merges.push('A'+blockStart+':A'+(sheet.rows.length));
     sheet.merges.push('B'+blockStart+':B'+(sheet.rows.length));
+    sheet.merges.push('C'+blockStart+':C'+(sheet.rows.length));
   }
   if (kids.length === 0) {
     sheet.rows.push([XC('該当する子供が登録されていません', LG(4))]);
@@ -2684,13 +2710,13 @@ function buildOrderFormSheet(y, m, cat) {
   var sumStart = sheet.rows.length + 1;
   for (var k=0; k<NM; k++) {
     var mk = MEAL_KEYS[k];
-    var row = [XC(k===0 ? '合計食数' : '', LG(3)), XC('', LG(3)), XC(MEAL_NAMES[mk], LG(3))];
+    var row = [XC(k===0 ? '合計食数' : '', LG(3)), XC('', LG(3)), XC('', LG(3)), XC(MEAL_NAMES[mk], LG(3))];
     var tot = 0;
     for (var d=0; d<days; d++) { tot += grand[mk][d]; row.push(XC(grand[mk][d], LG(3))); }
     row.push(XC(tot, LG(3)));
     sheet.rows.push(row);
   }
-  sheet.merges.push('A'+sumStart+':B'+(sheet.rows.length));
+  sheet.merges.push('A'+sumStart+':C'+(sheet.rows.length));
 
   // きざみ食の内訳。合計食数のうち何食がきざみかを示す
   var hasKizami = false;
@@ -2700,7 +2726,7 @@ function buildOrderFormSheet(y, m, cat) {
     var kStart = sheet.rows.length + 1;
     for (var k=0; k<NM; k++) {
       var mk = MEAL_KEYS[k];
-      var row2 = [XC(k===0 ? 'うち きざみ食' : '', LG(3)), XC('', LG(3)), XC(MEAL_NAMES[mk], LG(3))];
+      var row2 = [XC(k===0 ? 'うち きざみ食' : '', LG(3)), XC('', LG(3)), XC('', LG(3)), XC(MEAL_NAMES[mk], LG(3))];
       var totK = 0;
       for (var d=0; d<days; d++) {
         totK += grandK[mk][d];
@@ -2709,7 +2735,7 @@ function buildOrderFormSheet(y, m, cat) {
       row2.push(XC(totK ? totK : '', LG(3)));
       sheet.rows.push(row2);
     }
-    sheet.merges.push('A'+kStart+':B'+(sheet.rows.length));
+    sheet.merges.push('A'+kStart+':C'+(sheet.rows.length));
   }
 
   setFormSheetPage(sheet);
@@ -2721,7 +2747,7 @@ function setFormSheetPage(sheet) {
   sheet.defaultRowHeight = fitRowHeight(sheet.rows.length);
   sheet.page = {
     paper: 9, landscape: true, fitToWidth: 1, fitToHeight: 0,
-    repeatRows: '2:3', repeatCols: 'A:C'
+    repeatRows: '2:3', repeatCols: 'A:D'
   };
 }
 
