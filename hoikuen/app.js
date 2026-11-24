@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-24a';
+var APP_VERSION = '2026-11-24b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -2559,7 +2559,7 @@ function buildAttendanceSheet(y, m) {
   var lastCol = xlsxColLetter(ncol - 1);
 
   var tr = sheet.rows.length + 1;
-  var t = [XC(y+'年'+m+'月　出欠確認', LG(3))];
+  var t = [XC(y+'年'+m+'月　出欠確認　　○＝普通食　き＝きざみ食（その日にきざみ食がある場合）', LG(3))];
   for (var c=1; c<ncol; c++) t.push(XC('', LG(3)));
   sheet.rows.push(t);
   sheet.merges.push('A'+tr+':'+lastCol+tr);
@@ -2591,11 +2591,15 @@ function buildAttendanceSheet(y, m) {
       for (var d=1; d<=days; d++) {
         var sh = getShift(kid.staffId, y, m, d);
         var o  = getCountedOrder(kid.id, y, m, d);
-        var any = false;
-        for (var k=0; k<MEAL_KEYS.length; k++) if (o[MEAL_KEYS[k]]) any = true;
+        var any = false, anyK = false;
+        for (var k=0; k<MEAL_KEYS.length; k++) {
+          var t = o[MEAL_KEYS[k]];
+          if (t) { any = true; if (t === 'kizami') anyK = true; }
+        }
         // 添付帳票と同じく「○＋勤務区分」の形で表示する。
+        // きざみ食がある日は○の代わりに「き」を出し、食種が分かるようにする。
         // 丸は U+25CB を使う（U+25EF は印刷時に大きすぎて隣のマスへはみ出す）
-        var v = any ? ('○' + (sh || '')) : '';
+        var v = any ? ((anyK ? 'き' : '○') + (sh || '')) : '';
         row.push(XC(v, dayFillStyleLg(y,m,d,false)));
       }
       sheet.rows.push(row);
@@ -2621,7 +2625,7 @@ function buildOrderFormSheet(y, m, cat) {
   var lastCol = xlsxColLetter(ncol - 1);
 
   var tr = sheet.rows.length + 1;
-  var t = [XC(y+'年'+m+'月　食事注文表（'+cat.label+'）', LG(3))];
+  var t = [XC(y+'年'+m+'月　食事注文表（'+cat.label+'）　　○＝普通食　き＝きざみ食', LG(3))];
   for (var c=1; c<ncol; c++) t.push(XC('', LG(3)));
   sheet.rows.push(t);
   sheet.merges.push('A'+tr+':'+lastCol+tr);
@@ -2639,8 +2643,9 @@ function buildOrderFormSheet(y, m, cat) {
 
   var kids = sortChildrenByAge(
     childrenWithOrders(y, m, children.filter(function(c) { return childCategory(c) === cat.key; })), y, m);
-  var grand = {}; for (var k=0; k<NM; k++) grand[MEAL_KEYS[k]] = [];
-  for (var k=0; k<NM; k++) for (var d=0; d<days; d++) grand[MEAL_KEYS[k]].push(0);
+  var grand = {}, grandK = {};
+  for (var k=0; k<NM; k++) { grand[MEAL_KEYS[k]] = []; grandK[MEAL_KEYS[k]] = []; }
+  for (var k=0; k<NM; k++) for (var d=0; d<days; d++) { grand[MEAL_KEYS[k]].push(0); grandK[MEAL_KEYS[k]].push(0); }
 
   for (var j=0; j<kids.length; j++) {
     var kid = kids[j];
@@ -2654,9 +2659,13 @@ function buildOrderFormSheet(y, m, cat) {
       var cnt = 0;
       for (var d=1; d<=days; d++) {
         var o = getCountedOrder(kid.id, y, m, d);
-        var on = !!o[mk];
-        if (on) { cnt++; grand[mk][d-1]++; }
-        row.push(XC(on ? '○' : '', dayFillStyleLg(y,m,d,false)));
+        var v = o[mk] || '';
+        if (v) {
+          cnt++; grand[mk][d-1]++;
+          if (v === 'kizami') grandK[mk][d-1]++;
+        }
+        // 普通食は○、きざみ食は「き」。栄養科が一目で区別できるようにする
+        row.push(XC(v === 'kizami' ? 'き' : (v ? '○' : ''), dayFillStyleLg(y,m,d,false)));
       }
       row.push(XC(cnt, LG(3)));
       sheet.rows.push(row);
@@ -2682,6 +2691,27 @@ function buildOrderFormSheet(y, m, cat) {
     sheet.rows.push(row);
   }
   sheet.merges.push('A'+sumStart+':B'+(sheet.rows.length));
+
+  // きざみ食の内訳。合計食数のうち何食がきざみかを示す
+  var hasKizami = false;
+  for (var k=0; k<NM && !hasKizami; k++)
+    for (var d=0; d<days; d++) if (grandK[MEAL_KEYS[k]][d] > 0) { hasKizami = true; break; }
+  if (hasKizami) {
+    var kStart = sheet.rows.length + 1;
+    for (var k=0; k<NM; k++) {
+      var mk = MEAL_KEYS[k];
+      var row2 = [XC(k===0 ? 'うち きざみ食' : '', LG(3)), XC('', LG(3)), XC(MEAL_NAMES[mk], LG(3))];
+      var totK = 0;
+      for (var d=0; d<days; d++) {
+        totK += grandK[mk][d];
+        row2.push(XC(grandK[mk][d] ? grandK[mk][d] : '', LG(3)));
+      }
+      row2.push(XC(totK ? totK : '', LG(3)));
+      sheet.rows.push(row2);
+    }
+    sheet.merges.push('A'+kStart+':B'+(sheet.rows.length));
+  }
+
   setFormSheetPage(sheet);
   return sheet;
 }
