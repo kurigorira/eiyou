@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-24c';
+var APP_VERSION = '2026-11-24d';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -2579,7 +2579,7 @@ function buildAttendanceSheet(y, m) {
   var lastCol = xlsxColLetter(ncol - 1);
 
   var tr = sheet.rows.length + 1;
-  var t = [XC(y+'年'+m+'月　出欠確認　　○＝普通食　き＝きざみ食（その日にきざみ食がある場合）', LG(3))];
+  var t = [XC(y+'年'+m+'月　出欠確認　　マスは食事のある日の保護者の勤務区分（勤務区分がない日は○）', LG(3))];
   for (var c=1; c<ncol; c++) t.push(XC('', LG(3)));
   sheet.rows.push(t);
   sheet.merges.push('A'+tr+':'+lastCol+tr);
@@ -2613,15 +2613,13 @@ function buildAttendanceSheet(y, m) {
       for (var d=1; d<=days; d++) {
         var sh = getShift(kid.staffId, y, m, d);
         var o  = getCountedOrder(kid.id, y, m, d);
-        var any = false, anyK = false;
-        for (var k=0; k<MEAL_KEYS.length; k++) {
-          var t = o[MEAL_KEYS[k]];
-          if (t) { any = true; if (t === 'kizami') anyK = true; }
-        }
-        // 添付帳票と同じく「○＋勤務区分」の形で表示する。
-        // きざみ食がある日は○の代わりに「き」を出し、食種が分かるようにする。
+        var any = false;
+        for (var k=0; k<MEAL_KEYS.length; k++) if (o[MEAL_KEYS[k]]) { any = true; break; }
+        // 食事のある日は保護者の勤務区分だけを表示する（○は付けない）。
+        // 勤務区分が入っていない日は、出欠が分かるように○を出す。
         // 丸は U+25CB を使う（U+25EF は印刷時に大きすぎて隣のマスへはみ出す）
-        var v = any ? ((anyK ? 'き' : '○') + (sh || '')) : '';
+        // 食種（普通／きざみ）は左の「食種」欄で分かるため、ここには出さない。
+        var v = any ? (sh || '○') : '';
         row.push(XC(v, dayFillStyleLg(y,m,d,false)));
       }
       sheet.rows.push(row);
