@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-19b';
+var APP_VERSION = '2026-11-24a';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -1522,7 +1522,7 @@ function renderOrderLockNotice() {
   }
 }
 function setOrderControlsDisabled(disabled) {
-  var ids = ['bulk-weekday-all','bulk-copy-prev','bulk-clear','order-confirm','order-edit'];
+  var ids = ['bulk-lunch-swap','bulk-copy-prev','bulk-clear','order-confirm','order-edit'];
   for (var i=0; i<ids.length; i++) {
     var el = document.getElementById(ids[i]);
     if (el) el.disabled = disabled;
@@ -1535,7 +1535,9 @@ function requireUnlocked() {
   return true;
 }
 
-function bulkSetWeekdayAll() {
+// 昼食の食種を一括で入れ替える（普通食⇔きざみ食）。
+// 注文の入っていない日はそのまま（空欄のまま）にする。
+function bulkSwapLunchType() {
   var childId = document.getElementById('order-child').value;
   var staffId = document.getElementById('order-staff').value;
   if (!childId) { showToast('子供を選択してください'); return; }
@@ -1543,16 +1545,19 @@ function bulkSetWeekdayAll() {
   var y = parseInt(document.getElementById('order-year').value);
   var m = parseInt(document.getElementById('order-month').value);
   var days = daysInMonth(y, m);
+  var toKizami = 0, toNormal = 0;
   for (var d=1; d<=days; d++) {
-    if (isWorkday(y, m, d)) {
-      for (var k=0; k<MEAL_KEYS.length; k++) setOrder(childId, y, m, d, MEAL_KEYS[k], 'normal');
-    }
+    var cur = getOrder(childId, y, m, d).l || '';
+    if (cur === 'normal')      { setOrder(childId, y, m, d, 'l', 'kizami'); toKizami++; }
+    else if (cur === 'kizami') { setOrder(childId, y, m, d, 'l', 'normal'); toNormal++; }
   }
+  if (toKizami === 0 && toNormal === 0) { showToast('昼食の注文がありません'); return; }
   saveOrdersForChild(childId, y, m);
-  addHistory(staffId, childId, y+'-'+pad(m), '一括操作', '平日全食セット（普通食）');
+  var detail = '昼食の食種を入替（普通→きざみ ' + toKizami + '日 / きざみ→普通 ' + toNormal + '日）';
+  addHistory(staffId, childId, y+'-'+pad(m), '一括操作', detail);
   orderDirty = true;
   renderOrderGridKeepUnlocked();
-  showToast('平日の全食を普通食でセットしました');
+  showToast('昼食を入れ替えました（普通→きざみ ' + toKizami + '日 / きざみ→普通 ' + toNormal + '日）');
 }
 
 function bulkCopyPrev() {
@@ -3362,7 +3367,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('order-staff').addEventListener('change', populateOrderChild);
     document.getElementById('order-child').addEventListener('change', renderOrderGrid);
     document.getElementById('bulk-shift-month').addEventListener('click', applyShiftToMonth);
-    document.getElementById('bulk-weekday-all').addEventListener('click', bulkSetWeekdayAll);
+    document.getElementById('bulk-lunch-swap').addEventListener('click', bulkSwapLunchType);
     document.getElementById('bulk-copy-prev').addEventListener('click', bulkCopyPrev);
     document.getElementById('bulk-clear').addEventListener('click', bulkClear);
     document.getElementById('order-confirm').addEventListener('click', confirmOrder);
