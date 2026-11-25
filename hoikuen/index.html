@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20261125a">
+<link rel="stylesheet" href="style.css?v=20261125b">
 </head>
 <body>
 <div id="app">
@@ -237,15 +237,15 @@
       <div class="card">
         <h3>勤務種の設定</h3>
         <p class="help-text">勤務入力で選べる勤務の種類です。1行に1つずつ書いてください。
-          ここで設定した内容がそのまま選択肢になります。</p>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
-          <textarea id="hsk-text" rows="7" style="width:220px;font-size:0.9rem"
-                    placeholder="早番&#10;日勤&#10;遅番&#10;夜勤&#10;休&#10;有"></textarea>
+          ここで設定した内容がそのまま選択肢になり、帳票にもそのまま出ます。</p>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+          <textarea id="hsk-text" rows="18" style="width:170px;font-size:0.9rem"></textarea>
           <div>
             <button class="btn" id="hsk-save">勤務種を保存</button><br>
-            <button class="btn btn-outline" id="hsk-default" style="margin-top:6px">標準の6種を入れる</button>
+            <button class="btn btn-outline" id="hsk-default" style="margin-top:6px">標準の勤務種を入れる</button>
             <p id="hsk-status" class="help-text" style="margin-top:8px"></p>
           </div>
+          <div id="hsk-legend" style="font-size:0.85rem"></div>
         </div>
       </div>
 
@@ -391,7 +391,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20261125a"></script>
-<script src="app.js?v=20261125a"></script>
+<script src="../xlsx.js?v=20261125b"></script>
+<script src="app.js?v=20261125b"></script>
 </body>
 </html>

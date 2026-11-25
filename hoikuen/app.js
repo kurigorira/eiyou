@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-25a';
+var APP_VERSION = '2026-11-25b';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -695,8 +695,23 @@ function saveHoikuDeptSetting() {
 }
 
 // ==================== 保育士の個別登録（職員マスタに無い方の補助） ====================
-// 勤務種の初期値。「料金・勤務区分」タブで自由に追加・変更できる。
-var DEFAULT_HOIKU_SHIFT_VALUES = ['早番', '日勤', '遅番', '夜勤', '休', '有'];
+// 勤務種の初期値。「保育園職員」タブの「勤務種の設定」で自由に追加・変更できる。
+var DEFAULT_HOIKU_SHIFT_VALUES = [
+  '×',
+  '●E', '●G',
+  '・A', '・B', '・C', '・D',
+  '△=', '○-',
+  '●EX', '●EY', '●GX', '●GY',
+  'X▲G', 'X▲H', 'Y▲G', 'Y▲H'
+];
+// 勤務種の補足。入力時の選択肢と設定画面の凡例に出す（保存される値は勤務種そのもの）
+var HOIKU_SHIFT_NOTES = {
+  '×':   '休み／有／リフ休',
+  '△=':  '夜勤 入り',
+  '○-':  '夜勤 明け',
+  'X▲G': '13:30−17:30',
+  'X▲H': '14:00−18:00'
+};
 
 // 勤務表に入力する職員の一覧。
 // ① 職員マスタから「保育園職員」タブで選んだ職員
@@ -911,6 +926,18 @@ function renderHoikuShiftKinds() {
     var src = (hoikuShiftKinds && hoikuShiftKinds.length) ? hoikuShiftKinds : DEFAULT_HOIKU_SHIFT_VALUES;
     ta.value = src.join('\n');
   }
+  // 補足のある勤務種の凡例
+  var lg = document.getElementById('hsk-legend');
+  if (lg) {
+    var rows = '';
+    for (var k in HOIKU_SHIFT_NOTES) {
+      rows += '<tr><td style="padding:2px 10px 2px 0;white-space:nowrap"><strong>'+esc(k)+'</strong></td>'
+           +  '<td style="padding:2px 0">'+esc(HOIKU_SHIFT_NOTES[k])+'</td></tr>';
+    }
+    lg.innerHTML = '<strong>補足のある勤務種</strong><table style="margin-top:4px">'+rows+'</table>'
+                 + '<p class="help-text" style="margin-top:6px;max-width:260px">'
+                 + '休み・有給・リフレッシュ休暇はまとめて <strong>×</strong> です。</p>';
+  }
   // 一括入力の選択肢も合わせる
   var bulk = document.getElementById('hss-bulk-value');
   if (bulk) {
@@ -941,7 +968,8 @@ function saveHoikuShiftKindsFromText() {
 function fillDefaultHoikuShiftKinds() {
   document.getElementById('hsk-text').value = DEFAULT_HOIKU_SHIFT_VALUES.join('\n');
   var el = document.getElementById('hsk-status');
-  if (el) el.textContent = '標準の6種を入れました。「勤務種を保存」を押してください';
+  if (el) el.textContent = '標準の' + DEFAULT_HOIKU_SHIFT_VALUES.length
+                         + '種を入れました。「勤務種を保存」を押してください';
 }
 
 // 入力候補（既定の候補＋すでに使われている値）
@@ -1010,14 +1038,19 @@ function renderHoikuShiftGrid() {
   }
 }
 
-// 勤務種の選択肢。マスタに無い値（過去の入力）も選択肢に残す
+// 勤務種の選択肢。マスタに無い値（過去の入力）も選択肢に残す。
+// 補足のある勤務種は「△=（夜勤 入り）」のように出すが、保存される値は勤務種そのもの。
+function hoikuKindLabel(v) {
+  return HOIKU_SHIFT_NOTES[v] ? (v + '（' + HOIKU_SHIFT_NOTES[v] + '）') : v;
+}
 function hoikuKindOptionsHtml(kinds, current) {
   var cur = current || '';
   var html = '<option value="">−</option>';
   var found = (cur === '');
   for (var i=0; i<kinds.length; i++) {
     if (kinds[i] === cur) found = true;
-    html += '<option value="'+esc(kinds[i])+'"'+(kinds[i]===cur?' selected':'')+'>'+esc(kinds[i])+'</option>';
+    html += '<option value="'+esc(kinds[i])+'"'+(kinds[i]===cur?' selected':'')+'>'
+         +  esc(hoikuKindLabel(kinds[i]))+'</option>';
   }
   if (!found) html += '<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>';
   return html;
