@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-24d';
+var APP_VERSION = '2026-11-25a';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -24,6 +24,7 @@ var hoikuStaff = [];     // 保育園で働く職員（保育士）[{id, name, r
 var hoikuShifts = {};    // 保育士の勤務 {年月: {保育士ID: {日: '早番'}}}
 var shiftDepts = {};     // 勤務管理DBから取り込んだ部署CD {年月: {職員ID: '014'}}
 var hoikuMembers = [];   // 保育園の職員として選んだ職員ID（部署で区別できない場合に使う）
+var hoikuShiftKinds = []; // 保育園職員の勤務種マスタ（例: 早番/日勤/遅番）
 var hAdminMode = false;
 var toastTimer = null;
 var orderLocked = true;
@@ -54,6 +55,7 @@ function loadData() {
     hoikuShifts = d.hoiku_shifts || {};
     shiftDepts = d.shift_depts || {};
     hoikuMembers = d.hoiku_members || [];
+    hoikuShiftKinds = d.hoiku_shiftkinds || [];
   });
 }
 
@@ -693,8 +695,49 @@ function saveHoikuDeptSetting() {
 }
 
 // ==================== 保育士の個別登録（職員マスタに無い方の補助） ====================
-// よく使う勤務の候補。入力欄の候補として出すだけで、これ以外も自由に入力できる。
+// 勤務種の初期値。「料金・勤務区分」タブで自由に追加・変更できる。
 var DEFAULT_HOIKU_SHIFT_VALUES = ['早番', '日勤', '遅番', '夜勤', '休', '有'];
+
+// 勤務表に入力する職員の一覧。
+// ① 職員マスタから「保育園職員」タブで選んだ職員
+// ② 職員マスタに無い方として個別登録した保育士
+// の両方をまとめ、職員IDの若い順（個別登録は最後）に並べる。
+function getHoikuShiftTargets() {
+  var out = [];
+  var byId = {};
+  for (var i=0; i<staffList.length; i++) byId[staffList[i].id] = staffList[i];
+  for (var i=0; i<hoikuMembers.length; i++) {
+    var sid = hoikuMembers[i], st = byId[sid];
+    out.push({id: sid, name: st ? st.name : sid, role: '', fromMaster: true});
+  }
+  out.sort(function(a, b) { return compareStaffId(a.id, b.id); });
+  var extra = getHoikuStaffSorted();
+  for (var i=0; i<extra.length; i++) {
+    out.push({id: extra[i].id, name: extra[i].name, role: extra[i].role || '', fromMaster: false});
+  }
+  return out;
+}
+
+// 勤務種の一覧（マスタ＋すでに使われている値）
+function getHoikuShiftKinds() {
+  var seen = {}, vals = [];
+  var src = (hoikuShiftKinds && hoikuShiftKinds.length) ? hoikuShiftKinds : DEFAULT_HOIKU_SHIFT_VALUES;
+  for (var i=0; i<src.length; i++) {
+    var v = String(src[i]).trim();
+    if (v && !seen[v]) { seen[v] = true; vals.push(v); }
+  }
+  // 過去に入力した値も候補に残す（マスタから消しても入力済みの分は選べる）
+  for (var ym in hoikuShifts) {
+    for (var sid in hoikuShifts[ym]) {
+      for (var d in hoikuShifts[ym][sid]) {
+        var v2 = String(hoikuShifts[ym][sid][d]).trim();
+        if (v2 && !seen[v2]) { seen[v2] = true; vals.push(v2); }
+      }
+    }
+  }
+  return vals;
+}
+function saveHoikuShiftKinds() { apiSave('hoiku_shiftkinds', hoikuShiftKinds); }
 
 function getHoikuStaffById(id) {
   for (var i=0; i<hoikuStaff.length; i++) if (hoikuStaff[i].id === id) return hoikuStaff[i];
@@ -763,11 +806,16 @@ function initHoikuStaffTab() {
     ySel.value = now.getFullYear(); mSel.value = now.getMonth()+1;
   }
   var get = function(k) { return fetch(API_URL + '?key=' + k + '&t=' + Date.now()).then(function(r){return r.json();}); };
-  Promise.all([get('hoiku_staff'), get('hoiku_shifts')]).then(function(res) {
-    hoikuStaff  = res[0] || [];
-    hoikuShifts = res[1] || {};
+  Promise.all([get('hoiku_staff'), get('hoiku_shifts'), get('hoiku_shiftkinds'),
+               get('hoiku_members'), get('staff')]).then(function(res) {
+    hoikuStaff      = res[0] || [];
+    hoikuShifts     = res[1] || {};
+    hoikuShiftKinds = res[2] || [];
+    hoikuMembers    = res[3] || [];
+    staffList       = res[4] || staffList;
   }).catch(function(){}).then(function() {
     renderHoikuStaffList();
+    renderHoikuShiftKinds();
     renderHoikuShiftValues();
     renderHoikuShiftGrid();
   });
@@ -856,6 +904,46 @@ function deleteHoikuStaff(id) {
   showToast(st.name + ' を削除しました');
 }
 
+// 勤務種の設定欄を描く
+function renderHoikuShiftKinds() {
+  var ta = document.getElementById('hsk-text');
+  if (ta) {
+    var src = (hoikuShiftKinds && hoikuShiftKinds.length) ? hoikuShiftKinds : DEFAULT_HOIKU_SHIFT_VALUES;
+    ta.value = src.join('\n');
+  }
+  // 一括入力の選択肢も合わせる
+  var bulk = document.getElementById('hss-bulk-value');
+  if (bulk) {
+    var cur = bulk.value;
+    bulk.innerHTML = hoikuKindOptionsHtml(getHoikuShiftKinds(), '');
+    bulk.value = cur;
+    if (bulk.selectedIndex < 0) bulk.value = '';
+  }
+}
+
+function saveHoikuShiftKindsFromText() {
+  var ta = document.getElementById('hsk-text');
+  var lines = (ta.value || '').split('\n');
+  var seen = {}, out = [];
+  for (var i=0; i<lines.length; i++) {
+    var v = lines[i].trim();
+    if (v && !seen[v]) { seen[v] = true; out.push(v); }
+  }
+  hoikuShiftKinds = out;
+  saveHoikuShiftKinds();
+  renderHoikuShiftKinds();
+  renderHoikuShiftGrid();
+  var el = document.getElementById('hsk-status');
+  if (el) el.textContent = out.length + '種を保存しました（' + out.join('、') + '）';
+  showToast('勤務種を保存しました');
+}
+
+function fillDefaultHoikuShiftKinds() {
+  document.getElementById('hsk-text').value = DEFAULT_HOIKU_SHIFT_VALUES.join('\n');
+  var el = document.getElementById('hsk-status');
+  if (el) el.textContent = '標準の6種を入れました。「勤務種を保存」を押してください';
+}
+
 // 入力候補（既定の候補＋すでに使われている値）
 function renderHoikuShiftValues() {
   var dl = document.getElementById('hss-values');
@@ -881,16 +969,18 @@ function renderHoikuShiftValues() {
 function renderHoikuShiftGrid() {
   var wrap = document.getElementById('hss-grid');
   if (!wrap) return;
-  var list = getHoikuStaffSorted();
+  var list = getHoikuShiftTargets();
   if (list.length === 0) {
-    wrap.innerHTML = '<p class="placeholder-msg">先に上で保育士を登録してください</p>';
+    wrap.innerHTML = '<p class="placeholder-msg">保育園の職員がいません。'
+                   + '上の「保育園の職員を選ぶ」で選ぶか、「保育士の登録」で追加してください。</p>';
     return;
   }
   var y = parseInt(document.getElementById('hss-year').value);
   var m = parseInt(document.getElementById('hss-month').value);
   var days = daysInMonth(y, m);
+  var kinds = getHoikuShiftKinds();
   var html = '<table class="rpt-table" style="min-width:900px"><thead><tr>'
-           + '<th style="min-width:110px">氏名</th><th style="min-width:80px">職種</th>';
+           + '<th style="min-width:70px">職員ID</th><th style="min-width:110px">氏名</th>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y, m, d);
     var bg = getHolidayName(y+'-'+pad(m)+'-'+pad(d)) ? 'background:#fff8e1;'
@@ -900,21 +990,37 @@ function renderHoikuShiftGrid() {
   html += '</tr></thead><tbody>';
   for (var i=0; i<list.length; i++) {
     var s = list[i];
-    html += '<tr><td style="text-align:left;white-space:nowrap">'+esc(s.name)+'</td>'
-         +  '<td style="text-align:left;font-size:0.75rem">'+esc(s.role||'')+'</td>';
+    html += '<tr><td style="font-size:0.78rem">'
+         +  (s.fromMaster ? esc(s.id) : '<span style="color:#999">個別</span>') + '</td>'
+         +  '<td style="text-align:left;white-space:nowrap">'+esc(s.name)
+         +  (s.role ? '<br><span style="font-size:0.7rem;color:#888">'+esc(s.role)+'</span>' : '')
+         +  '</td>';
     for (var d=1; d<=days; d++) {
       var v = getHoikuShift(s.id, y, m, d);
-      html += '<td style="padding:1px"><input type="text" class="hss-cell" list="hss-values"'
-           +  ' data-id="'+esc(s.id)+'" data-d="'+d+'" value="'+esc(v)+'"></td>';
+      html += '<td style="padding:1px"><select class="hss-cell" data-id="'+esc(s.id)+'" data-d="'+d+'">'
+           +  hoikuKindOptionsHtml(kinds, v) + '</select></td>';
     }
     html += '</tr>';
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
-  var cells = wrap.querySelectorAll('input.hss-cell');
+  var cells = wrap.querySelectorAll('select.hss-cell');
   for (var i=0; i<cells.length; i++) {
     cells[i].addEventListener('change', onHoikuShiftCellChange);
   }
+}
+
+// 勤務種の選択肢。マスタに無い値（過去の入力）も選択肢に残す
+function hoikuKindOptionsHtml(kinds, current) {
+  var cur = current || '';
+  var html = '<option value="">−</option>';
+  var found = (cur === '');
+  for (var i=0; i<kinds.length; i++) {
+    if (kinds[i] === cur) found = true;
+    html += '<option value="'+esc(kinds[i])+'"'+(kinds[i]===cur?' selected':'')+'>'+esc(kinds[i])+'</option>';
+  }
+  if (!found) html += '<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>';
+  return html;
 }
 
 function onHoikuShiftCellChange() {
@@ -939,8 +1045,8 @@ function setHoikuShiftStatus(msg, isError) {
 }
 
 function hoikuShiftBulkWeekday() {
-  var list = getHoikuStaffSorted();
-  if (list.length === 0) { setHoikuShiftStatus('先に保育士を登録してください', true); return; }
+  var list = getHoikuShiftTargets();
+  if (list.length === 0) { setHoikuShiftStatus('保育園の職員がいません', true); return; }
   var v = (document.getElementById('hss-bulk-value').value || '').trim();
   var y = parseInt(document.getElementById('hss-year').value);
   var m = parseInt(document.getElementById('hss-month').value);
@@ -961,8 +1067,8 @@ function hoikuShiftBulkWeekday() {
 }
 
 function hoikuShiftCopyPrev() {
-  var list = getHoikuStaffSorted();
-  if (list.length === 0) { setHoikuShiftStatus('先に保育士を登録してください', true); return; }
+  var list = getHoikuShiftTargets();
+  if (list.length === 0) { setHoikuShiftStatus('保育園の職員がいません', true); return; }
   var y = parseInt(document.getElementById('hss-year').value);
   var m = parseInt(document.getElementById('hss-month').value);
   var py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1;
@@ -985,7 +1091,7 @@ function hoikuShiftCopyPrev() {
 }
 
 function hoikuShiftClear() {
-  var list = getHoikuStaffSorted();
+  var list = getHoikuShiftTargets();
   if (list.length === 0) return;
   var y = parseInt(document.getElementById('hss-year').value);
   var m = parseInt(document.getElementById('hss-month').value);
@@ -1089,7 +1195,7 @@ function fetchAggregateData(fn) {
   };
   Promise.all([get('hoiku_orders'), get('hoiku_confirmed'), get('prices'), get('shifts'),
                get('children'), get('shiftdefs'), get('hoiku_staff'), get('hoiku_shifts'),
-               get('shift_depts'), get('hoiku_members'), get('staff')])
+               get('shift_depts'), get('hoiku_members'), get('staff'), get('hoiku_shiftkinds')])
     .then(function(res) {
       orders = res[0] || {};
       hoikuConfirmed = res[1] || {};
@@ -1102,6 +1208,7 @@ function fetchAggregateData(fn) {
       shiftDepts = res[8] || {};
       hoikuMembers = res[9] || [];
       staffList = res[10] || staffList;
+      hoikuShiftKinds = res[11] || [];
       fn();
     }).catch(function() { fn(); });
 }
@@ -2503,9 +2610,11 @@ function exportHoikuFormExcel() {
 // 個別登録した分を続けて出す。
 function appendShiftBlock(sheet, y, m, days) {
   var deptName = getHoikuDeptName();
-  var list = getHoikuDeptStaff();
-  var extra = getHoikuStaffSorted();
+  var list = getHoikuShiftTargets();
   var label = hoikuMembers.length > 0 ? '保育園の職員' : '部署: ' + deptName;
+  if (list.length === 0) list = getHoikuDeptStaff().map(function(s) {
+    return {id: s.id, name: s.name || s.id, role: '', fromMaster: true};
+  });
 
   sheet.rows.push([]);
   var tr = sheet.rows.length + 1;
@@ -2520,39 +2629,29 @@ function appendShiftBlock(sheet, y, m, days) {
   sheet.rows.push(hdr);
   sheet.merges.push('B'+hdrRow+':D'+hdrRow);
 
-  if (list.length === 0 && extra.length === 0) {
+  if (list.length === 0) {
     sheet.rows.push([XC('保育園の職員が設定されていません（管理者モード →「保育園職員」タブで選んでください）', LG(4))]);
     return;
   }
   var anyShift = false;
-  // ① 職員マスタの保育園職員（勤務は勤務管理DBから取り込んだもの）。職員IDの若い順
   for (var i=0; i<list.length; i++) {
     var s = list[i];
     var rn = sheet.rows.length + 1;
-    var row = [XC(s.id, LG(4)), XC(s.name || '', LG(4)), XC('', LG(4)), XC('', LG(4))];
+    var row = [XC(s.fromMaster ? s.id : '', LG(4)), XC(s.name || '', LG(4)),
+               XC('', LG(4)), XC('', LG(4))];
     for (var d=1; d<=days; d++) {
-      var v = getShift(s.id, y, m, d);
+      // 「保育園職員」タブで手入力した勤務を優先し、
+      // 入力が無い日だけ勤務管理DBから取り込んだ勤務区分を使う
+      var v = getHoikuShift(s.id, y, m, d);
+      if (!v && s.fromMaster) v = getShift(s.id, y, m, d);
       if (v) anyShift = true;
       row.push(XC(v, dayFillStyleLg(y,m,d,false)));
     }
     sheet.rows.push(row);
     sheet.merges.push('B'+rn+':D'+rn);
   }
-  // ② 「保育園職員」タブで個別に登録した方（職員マスタに無い場合の補助）
-  for (var i=0; i<extra.length; i++) {
-    var e = extra[i];
-    var rn2 = sheet.rows.length + 1;
-    var row2 = [XC('', LG(4)), XC(e.name, LG(4)), XC('', LG(4)), XC('', LG(4))];
-    for (var d=1; d<=days; d++) {
-      var v2 = getHoikuShift(e.id, y, m, d);
-      if (v2) anyShift = true;
-      row2.push(XC(v2, dayFillStyleLg(y,m,d,false)));
-    }
-    sheet.rows.push(row2);
-    sheet.merges.push('B'+rn2+':D'+rn2);
-  }
   if (!anyShift) {
-    sheet.rows.push([XC(y+'年'+m+'月の勤務区分が取り込まれていません', LG(4))]);
+    sheet.rows.push([XC(y+'年'+m+'月の勤務が入力されていません（管理者モード →「保育園職員」タブで入力してください）', LG(4))]);
   }
 }
 
@@ -3200,21 +3299,20 @@ function buildShiftSection(y, m) {
 function buildHoikuStaffShiftSection(y, m) {
   var days = daysInMonth(y, m);
   var deptName = getHoikuDeptName();
-  var list = getHoikuDeptStaff();
-  var extra = getHoikuStaffSorted();
+  var list = getHoikuShiftTargets();
   var byMembers = hoikuMembers.length > 0;
+  if (list.length === 0) list = getHoikuDeptStaff().map(function(s) {
+    return {id: s.id, name: s.name || s.id, role: '', fromMaster: true};
+  });
   var title = byMembers ? '保育園の職員　勤務表' : '部署: '+esc(deptName)+'　勤務表';
   var html = '<div class="rpt-section"><h3>'+y+'年'+m+'月 '+title+'</h3>';
-  if (list.length === 0 && extra.length === 0) {
+  if (list.length === 0) {
     html += '<p class="notice notice-warning">保育園の職員が設定されていません。<br>'
-         +  '管理者モード →「<strong>保育園職員</strong>」タブで対象の職員を選んでください。<br>'
-         +  '（保育園が独立した部署の場合は、職員マスタの部署を「'+esc(deptName)+'」にするだけでも対象になります）'
-         +  '</p></div>';
+         +  '管理者モード →「<strong>保育園職員</strong>」タブで対象の職員を選んでください。</p></div>';
     return html;
   }
-  html += '<p class="help-text">食事注文表Excelの各シートの一番下に、この内容が出ます。'
-       +  (byMembers ? '（「保育園職員」タブで選んだ ' + hoikuMembers.length + '名）'
-                     : '（部署「' + esc(deptName) + '」の職員）') + '</p>';
+  html += '<p class="help-text">食事注文表Excelの出欠確認シートの一番下に、この内容が出ます。'
+       +  '勤務は「保育園職員」タブの<strong>勤務入力</strong>で登録します。</p>';
   html += '<div style="overflow-x:auto"><table class="rpt-table"><thead><tr><th>職員ID</th><th>氏名</th>';
   for (var d=1; d<=days; d++) {
     var dow = dayOfWeek(y,m,d);
@@ -3226,30 +3324,22 @@ function buildHoikuStaffShiftSection(y, m) {
   var anyShift = false;
   for (var i=0; i<list.length; i++) {
     var s = list[i];
-    html += '<tr><td style="font-size:0.8rem">'+esc(s.id)+'</td>'
-         +  '<td style="white-space:nowrap">'+esc(s.name || s.id)+'</td>';
+    html += '<tr><td style="font-size:0.8rem">'
+         +  (s.fromMaster ? esc(s.id) : '<span style="color:#999">個別</span>') + '</td>'
+         +  '<td style="white-space:nowrap">'+esc(s.name)
+         +  (s.role ? '<br><span style="font-size:0.7rem;color:#888">'+esc(s.role)+'</span>' : '')+'</td>';
     for (var d=1; d<=days; d++) {
-      var v = getShift(s.id, y, m, d);
+      var v = getHoikuShift(s.id, y, m, d);
+      if (!v && s.fromMaster) v = getShift(s.id, y, m, d);
       if (v) anyShift = true;
       html += '<td style="font-size:0.7rem;padding:2px">'+esc(v)+'</td>';
     }
     html += '</tr>';
   }
-  for (var i=0; i<extra.length; i++) {
-    var e = extra[i];
-    html += '<tr><td style="font-size:0.8rem;color:#999">-</td>'
-         +  '<td style="white-space:nowrap">'+esc(e.name)+(e.role?'<br><span style="font-size:0.7rem;color:#888">'+esc(e.role)+'</span>':'')+'</td>';
-    for (var d=1; d<=days; d++) {
-      var v2 = getHoikuShift(e.id, y, m, d);
-      if (v2) anyShift = true;
-      html += '<td style="font-size:0.7rem;padding:2px">'+esc(v2)+'</td>';
-    }
-    html += '</tr>';
-  }
   html += '</tbody></table></div>';
   if (!anyShift) {
-    html += '<p class="notice notice-warning">'+y+'年'+m+'月の勤務区分が取り込まれていません。'
-         +  '「料金・勤務区分」タブの「データベースから同期」で取り込んでください。</p>';
+    html += '<p class="notice notice-warning">'+y+'年'+m+'月の勤務が入力されていません。'
+         +  '管理者モード →「保育園職員」タブの「勤務入力」で入力してください。</p>';
   }
   html += '</div>';
   return html;
@@ -3435,6 +3525,8 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('hm-search').addEventListener('input', renderHoikuMemberUI);
     document.getElementById('hm-add-dept').addEventListener('click', addVisibleHoikuMembers);
     document.getElementById('hm-clear').addEventListener('click', clearHoikuMembers);
+    document.getElementById('hsk-save').addEventListener('click', saveHoikuShiftKindsFromText);
+    document.getElementById('hsk-default').addEventListener('click', fillDefaultHoikuShiftKinds);
     document.getElementById('hstaff-form').addEventListener('submit', submitHoikuStaff);
     document.getElementById('hss-year').addEventListener('change', renderHoikuShiftGrid);
     document.getElementById('hss-month').addEventListener('change', renderHoikuShiftGrid);

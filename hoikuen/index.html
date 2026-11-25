@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>院内保育園 食事注文管理</title>
-<link rel="stylesheet" href="style.css?v=20261124d">
+<link rel="stylesheet" href="style.css?v=20261125a">
 </head>
 <body>
 <div id="app">
@@ -191,9 +191,9 @@
       <div class="card">
         <h3>保育園の職員を選ぶ</h3>
         <p class="help-text">
-          ここで選んだ職員の勤務が、<strong>食事注文表Excelの各シートの一番下</strong>に出ます。<br>
-          保育園が総務課などの中に含まれていて部署では区別できない場合は、ここで個別に選んでください。
-          勤務区分は勤務管理データベースから取り込んだものがそのまま使われます。</p>
+          ここで選んだ職員の勤務が、<strong>食事注文表Excelの「出欠確認」シートの一番下</strong>に出ます。<br>
+          保育園が総務課などの中に含まれていて部署では区別できない場合は、ここで個別に選んでください。<br>
+          勤務は下の「<strong>勤務入力</strong>」でこの画面から登録します（勤務管理データベースは使いません）。</p>
         <div class="inline-form">
           <label>部署で絞り込み:
             <select id="hm-dept"><option value="">全部署</option></select>
@@ -220,10 +220,9 @@
       <div class="card">
         <h3>保育士の登録（職員マスタに無い方のみ）</h3>
         <p class="help-text">
-          <strong>通常この画面は使いません。</strong>保育園の職員は職員マスタに部署「保育園」で登録されており、
-          勤務区分も勤務管理データベースから自動で取り込まれます。<br>
-          職員マスタに載っていない方（パート・外部委託など）がいる場合だけ、ここで登録してください。
-          登録した方は、食事注文表Excelの勤務表に続けて出ます。</p>
+          職員マスタに載っていない方（パート・外部委託など）がいる場合に登録してください。<br>
+          上で選んだ職員だけで足りる場合は、この画面は使いません。
+          登録した方は下の「勤務入力」の一覧に加わり、食事注文表Excelの勤務表にも<strong>続けて</strong>出ます。</p>
         <form id="hstaff-form" class="inline-form">
           <input type="text" id="hs-name" placeholder="氏名" style="width:160px" required>
           <input type="text" id="hs-role" placeholder="職種（任意・例: 保育士／調理）" style="width:200px">
@@ -236,22 +235,38 @@
       </div>
 
       <div class="card">
-        <h3>保育士の勤務入力</h3>
-        <p class="help-text">月ごとの勤務表です。マス目に直接入力してください（例: 早番／日勤／遅番／休）。入力するとその場で保存されます。</p>
+        <h3>勤務種の設定</h3>
+        <p class="help-text">勤務入力で選べる勤務の種類です。1行に1つずつ書いてください。
+          ここで設定した内容がそのまま選択肢になります。</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start">
+          <textarea id="hsk-text" rows="7" style="width:220px;font-size:0.9rem"
+                    placeholder="早番&#10;日勤&#10;遅番&#10;夜勤&#10;休&#10;有"></textarea>
+          <div>
+            <button class="btn" id="hsk-save">勤務種を保存</button><br>
+            <button class="btn btn-outline" id="hsk-default" style="margin-top:6px">標準の6種を入れる</button>
+            <p id="hsk-status" class="help-text" style="margin-top:8px"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>勤務入力</h3>
+        <p class="help-text">保育園の職員の月ごとの勤務表です。マス目で勤務種を選んでください。
+          <strong>選んだ時点で保存されます。</strong><br>
+          ここで入力した内容が、食事注文表Excelの「出欠確認」シートの一番下に出ます。</p>
         <div class="inline-form">
           <label>年月:
             <select id="hss-year"></select>年
             <select id="hss-month"></select>月
           </label>
           <label>一括:
-            <input type="text" id="hss-bulk-value" list="hss-values" placeholder="例: 日勤" style="width:110px">
+            <select id="hss-bulk-value" style="width:120px"></select>
           </label>
           <button class="btn btn-outline" id="hss-bulk-weekday">平日にまとめて入れる</button>
           <button class="btn btn-outline" id="hss-copy-prev">前月コピー</button>
           <button class="btn btn-danger-outline" id="hss-clear">当月クリア</button>
           <span id="hss-status" class="help-text"></span>
         </div>
-        <datalist id="hss-values"></datalist>
         <div id="hss-grid" style="margin-top:10px;overflow-x:auto"></div>
       </div>
     </section>
@@ -376,7 +391,7 @@
   <div id="toast" class="toast"></div>
 </div>
 
-<script src="../xlsx.js?v=20261124d"></script>
-<script src="app.js?v=20261124d"></script>
+<script src="../xlsx.js?v=20261125a"></script>
+<script src="app.js?v=20261125a"></script>
 </body>
 </html>

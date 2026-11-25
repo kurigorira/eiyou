@@ -363,3 +363,13 @@ input[type="text"], input[type="date"], select {
   background: #fff8e1;
   border-top: 2px solid var(--warning);
 }
+
+/* 保育園職員の勤務入力のマス */
+.hss-cell {
+  width: 72px;
+  font-size: 0.78rem;
+  padding: 1px 2px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.hss-cell:focus { outline: 2px solid var(--primary); outline-offset: -1px; }

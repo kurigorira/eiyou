@@ -11,7 +11,8 @@ $allowed = array(
     'staff', 'orders', 'holidays', 'history', 'children', 'config',
     'confirmed', 'hoiku_orders', 'hoiku_history', 'hoiku_confirmed', 'kensa',
     'prices', 'shifts', 'shiftdefs', 'hoiku_config',
-    'hoiku_staff', 'hoiku_shifts', 'shift_depts', 'hoiku_members'
+    'hoiku_staff', 'hoiku_shifts', 'shift_depts', 'hoiku_members',
+    'hoiku_shiftkinds'
 );
 
 $defaults = array(
@@ -21,7 +22,7 @@ $defaults = array(
     'kensa'=>'{}', 'prices'=>'{}', 'shifts'=>'{}',
     'shiftdefs'=>'[]', 'hoiku_config'=>'{}',
     'hoiku_staff'=>'[]', 'hoiku_shifts'=>'{}', 'shift_depts'=>'{}',
-    'hoiku_members'=>'[]'
+    'hoiku_members'=>'[]', 'hoiku_shiftkinds'=>'[]'
 );
 
 /**
