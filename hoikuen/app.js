@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-25b';
+var APP_VERSION = '2026-11-27a';
 
 var API_URL = '../api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
@@ -697,7 +697,7 @@ function saveHoikuDeptSetting() {
 // ==================== 保育士の個別登録（職員マスタに無い方の補助） ====================
 // 勤務種の初期値。「保育園職員」タブの「勤務種の設定」で自由に追加・変更できる。
 var DEFAULT_HOIKU_SHIFT_VALUES = [
-  '×',
+  '×', '有', 'リフ休',
   '●E', '●G',
   '・A', '・B', '・C', '・D',
   '△=', '○-',
@@ -706,7 +706,9 @@ var DEFAULT_HOIKU_SHIFT_VALUES = [
 ];
 // 勤務種の補足。入力時の選択肢と設定画面の凡例に出す（保存される値は勤務種そのもの）
 var HOIKU_SHIFT_NOTES = {
-  '×':   '休み／有／リフ休',
+  '×':    '週休',
+  '有':   '有休',
+  'リフ休': 'リフレッシュ休暇',
   '△=':  '夜勤 入り',
   '○-':  '夜勤 明け',
   'X▲G': '13:30−17:30',
@@ -934,9 +936,21 @@ function renderHoikuShiftKinds() {
       rows += '<tr><td style="padding:2px 10px 2px 0;white-space:nowrap"><strong>'+esc(k)+'</strong></td>'
            +  '<td style="padding:2px 0">'+esc(HOIKU_SHIFT_NOTES[k])+'</td></tr>';
     }
+    // 保存済みの勤務種に新しい休みの区分が無いときは、入れ直しを促す
+    var saved = getHoikuShiftKinds(), has = {}, miss = [];
+    for (var si=0; si<saved.length; si++) has[saved[si]] = true;
+    for (var di=0; di<DEFAULT_HOIKU_SHIFT_VALUES.length; di++) {
+      if (!has[DEFAULT_HOIKU_SHIFT_VALUES[di]]) miss.push(DEFAULT_HOIKU_SHIFT_VALUES[di]);
+    }
     lg.innerHTML = '<strong>補足のある勤務種</strong><table style="margin-top:4px">'+rows+'</table>'
                  + '<p class="help-text" style="margin-top:6px;max-width:260px">'
-                 + '休み・有給・リフレッシュ休暇はまとめて <strong>×</strong> です。</p>';
+                 + '休みは <strong>×</strong>（週休）・<strong>有</strong>（有休）・'
+                 + '<strong>リフ休</strong>（リフレッシュ休暇）の3つに分けて入力します。</p>'
+                 + (miss.length
+                    ? '<p class="notice notice-warning" style="margin-top:6px;max-width:260px">'
+                      + '標準の勤務種のうち <strong>'+esc(miss.join('、'))+'</strong> が入っていません。'
+                      + '「標準の勤務種を入れる」→「勤務種を保存」で追加できます。</p>'
+                    : '');
   }
   // 一括入力の選択肢も合わせる
   var bulk = document.getElementById('hss-bulk-value');

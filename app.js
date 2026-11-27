@@ -1,6 +1,6 @@
 'use strict';
 
-var APP_VERSION = '2026-11-25b';
+var APP_VERSION = '2026-11-27a';
 var API_URL = 'api.php';
 var WEEKDAYS = ['日','月','火','水','木','金','土'];
 
